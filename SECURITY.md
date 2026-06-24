@@ -3,16 +3,12 @@
 Guardian is a security tool, so we hold its own security to a high bar and
 welcome responsible disclosure. Thank you for helping keep users safe.
 
-> ⚠️ Placeholders below marked `TODO` must be filled in before the first public
-> release (contact channel, PGP key, response SLAs).
-
 ## Reporting a vulnerability
 
-**Please do not open a public issue for security problems.**
-
-- **Preferred:** open a private GitHub Security Advisory — repository
-  *Security* tab → *Report a vulnerability*.
-- **Alternative:** email `TODO-security-contact` (PGP: `TODO-fingerprint`).
+**Please do not open a public issue for security problems.** Use GitHub's private
+vulnerability reporting: the repository's **Security** tab →
+**Report a vulnerability**. This opens an advisory visible only to the
+maintainers; there is no separate email channel.
 
 Include: the affected component and version/commit, reproduction steps, impact,
 and any proof-of-concept.
@@ -46,7 +42,8 @@ about anything that breaks that mediation:
 
 ## Our commitment
 
-- Acknowledge within `TODO` business days; initial triage and severity within `TODO`.
+- We aim to acknowledge a report within **5 business days**, and to give an
+  initial assessment (severity and next steps) within **10 business days**.
 - Coordinated disclosure; public credit to reporters who want it.
 - No bug bounty at this stage (volunteer open-source project).
 
