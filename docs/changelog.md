@@ -116,6 +116,8 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
   actions and no daemon. (The Tauri window in `ui/` remains the later GUI.)
 
 ### Added
+- Docs: `testing-with-claude-code.md` (live-test guide), `owasp-nist-coverage.md`
+  (framework coverage matrix), and `architecture/guardian-cli.md` (CLI + TUI).
 - Founding design documents: `README.md` (spec), `ROADMAP.md` (build plan with
   reusable implementation prompts), `CLAUDE.md` (always-loaded context and
   invariants).
