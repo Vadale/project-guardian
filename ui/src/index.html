@@ -5,30 +5,56 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Guardian — Approvals</title>
     <style>
-      :root { color-scheme: light dark; font-family: system-ui, -apple-system, sans-serif; }
-      body { margin: 0; padding: 1.25rem; background: #1113; }
-      h1 { font-size: 1.1rem; margin: 0 0 .25rem; }
-      #status { color: #888; font-size: .85rem; margin-bottom: 1rem; }
-      .card {
-        border: 1px solid #8884; border-radius: 10px; padding: .9rem 1rem;
-        margin-bottom: .75rem; background: #fff1; position: relative;
+      :root {
+        --green: #2ee66b;   /* positive / confirm / low risk */
+        --red: #ff4646;     /* negative / deny / high risk / error */
+        --dark-green: #206040; /* accents */
+        --yellow: #f0c83c;  /* mid risk */
+        --bg: #0c100d;
+        --fg: #d7e0d8;
+      }
+      body {
+        margin: 0; padding: 1rem 1.25rem; background: var(--bg); color: var(--fg);
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 14px;
+      }
+      .bar {
+        display: flex; align-items: center; gap: .6rem;
+        border: 1px solid var(--dark-green); border-radius: 6px;
+        padding: .4rem .6rem; margin-bottom: 1rem;
       }
       .badge {
-        position: absolute; top: .9rem; right: 1rem; color: #111;
-        font-size: .7rem; font-weight: 700; padding: .15rem .5rem; border-radius: 999px;
+        background: var(--dark-green); color: var(--green); font-weight: 700;
+        padding: .15rem .55rem; border-radius: 4px; letter-spacing: .08em;
       }
-      .tool { font-weight: 700; font-family: ui-monospace, monospace; margin-bottom: .3rem; }
-      .text { font-size: .95rem; margin-bottom: .8rem; max-width: 90%; }
+      .subtitle { color: var(--dark-green); font-weight: 700; }
+      #status { margin-left: auto; color: var(--yellow); }
+      #status.ok { color: var(--green); }
+      #status.err { color: var(--red); }
+      .card {
+        border: 1px solid var(--dark-green); border-radius: 8px;
+        padding: .7rem .9rem; margin-bottom: .7rem; background: #0f150f;
+      }
+      .row { display: flex; align-items: center; gap: .6rem; }
+      .tool { font-weight: 700; }
+      .risk { margin-left: auto; font-weight: 700; letter-spacing: -1px; }
+      .text { color: #aebbb0; margin: .45rem 0 .75rem; }
       .actions { display: flex; gap: .5rem; justify-content: flex-end; }
-      button { border: 0; border-radius: 8px; padding: .45rem .9rem; font-weight: 600; cursor: pointer; }
-      .allow { background: #2ecc71; color: #06321b; }
-      .deny  { background: #e74c3c; color: #3a0b06; }
-      .empty { color: #888; font-style: italic; }
+      button {
+        font-family: inherit; font-weight: 700; border: 0; border-radius: 6px;
+        padding: .4rem .95rem; cursor: pointer;
+      }
+      .allow { background: var(--green); color: #06250f; }
+      .deny { background: var(--red); color: #2a0606; }
+      .empty { color: var(--green); font-weight: 700; padding: 1rem .2rem; }
+      .empty small { display: block; color: var(--dark-green); font-weight: 400; margin-top: .3rem; }
     </style>
   </head>
   <body>
-    <h1>🛡️ Guardian — Approvals</h1>
-    <div id="status">Connecting…</div>
+    <div class="bar">
+      <span class="badge">GUARDIAN</span>
+      <span class="subtitle">AI action firewall</span>
+      <span id="status">connecting...</span>
+    </div>
     <div id="queue"></div>
     <script src="main.js"></script>
   </body>

@@ -1,23 +1,29 @@
-// Guardian approval UI. Polls the daemon (via the Tauri `pending` command) and
-// relays the user's allow/deny through `respond`. No policy logic here — the UI
-// only renders state and sends the human's decision.
+// Guardian approval UI (desktop). Polls the daemon via the Tauri `pending`
+// command and relays allow/deny through `respond`. No business logic here —
+// it only renders state and sends the human's decision. Matches the TUI theme.
 const { invoke } = window.__TAURI__.core;
 
 const queue = document.getElementById("queue");
 const status = document.getElementById("status");
 
-// Traffic-light colour for the advisory risk score (display only).
 function riskColor(risk) {
-  if (risk >= 80) return "#e74c3c"; // red
-  if (risk >= 40) return "#f1c40f"; // yellow
-  return "#2ecc71"; // green
+  if (risk >= 80) return "var(--red)";
+  if (risk >= 40) return "var(--yellow)";
+  return "var(--green)";
+}
+
+// ASCII risk meter, matching the terminal cockpit.
+function riskBar(risk) {
+  const filled = Math.min(10, Math.round(risk / 10));
+  return "[" + "▓".repeat(filled) + "░".repeat(10 - filled) + "]";
 }
 
 async function resolve(id, approve) {
   try {
     await invoke("respond", { id, approve });
   } catch (e) {
-    status.textContent = "Failed to send your decision: " + e;
+    status.textContent = "failed to send decision: " + e;
+    status.className = "err";
   }
   refresh();
 }
@@ -27,27 +33,43 @@ async function refresh() {
   try {
     items = await invoke("pending");
   } catch (e) {
-    status.textContent = "Cannot reach the Guardian daemon (" + e + "). Is it running?";
+    status.textContent = "cannot reach the daemon (" + e + ")";
+    status.className = "err";
     return;
   }
 
-  status.textContent = items.length
-    ? `${items.length} action(s) awaiting your review`
-    : "No actions awaiting review.";
+  if (items.length === 0) {
+    status.textContent = "0 pending";
+    status.className = "ok";
+  } else {
+    status.textContent = items.length + " pending";
+    status.className = "";
+  }
 
   queue.innerHTML = "";
+
+  if (items.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.innerHTML = "[ all clear ]<small>no actions are waiting for your review</small>";
+    queue.appendChild(empty);
+    return;
+  }
+
   for (const item of items) {
     const card = document.createElement("div");
     card.className = "card";
 
-    const badge = document.createElement("div");
-    badge.className = "badge";
-    badge.style.background = riskColor(item.risk);
-    badge.textContent = "risk " + item.risk;
-
-    const tool = document.createElement("div");
+    const row = document.createElement("div");
+    row.className = "row";
+    const tool = document.createElement("span");
     tool.className = "tool";
     tool.textContent = item.tool;
+    const risk = document.createElement("span");
+    risk.className = "risk";
+    risk.style.color = riskColor(item.risk);
+    risk.textContent = `risk ${riskBar(item.risk)} ${item.risk}`;
+    row.append(tool, risk);
 
     const text = document.createElement("div");
     text.className = "text";
@@ -65,7 +87,7 @@ async function refresh() {
     allow.onclick = () => resolve(item.id, true);
     actions.append(deny, allow);
 
-    card.append(badge, tool, text, actions);
+    card.append(row, text, actions);
     queue.appendChild(card);
   }
 }
