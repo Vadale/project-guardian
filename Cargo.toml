@@ -11,6 +11,7 @@ version = "0.0.0"
 edition = "2021"
 license = "Apache-2.0"
 authors = ["Project Guardian contributors"]
+repository = "https://github.com/Vadale/project-guardian"
 rust-version = "1.75"
 
 # Shared external dependency versions. Individual crates opt in with
