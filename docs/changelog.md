@@ -110,7 +110,8 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
   of `DaemonClient` — no business logic in the UI. Theme: bright green
   (`#2EE66B`) = confirm / low risk, bright red (`#FF4646`) = deny / high risk /
   errors, dark-green (`#206040`) accents. Verified by headless render tests
-  (ratatui `TestBackend`). (The Tauri window in `ui/` remains the later GUI.)
+  (ratatui `TestBackend`). `guardian ui --demo` previews the cockpit with sample
+  actions and no daemon. (The Tauri window in `ui/` remains the later GUI.)
 
 ### Added
 - Founding design documents: `README.md` (spec), `ROADMAP.md` (build plan with

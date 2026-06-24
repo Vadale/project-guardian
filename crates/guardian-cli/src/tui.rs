@@ -45,29 +45,33 @@ struct App {
     status: String,
     hits: Vec<Hit>,
     quit: bool,
+    /// Self-contained preview with sample data; no daemon is contacted.
+    demo: bool,
 }
 
-/// Entry point for `guardian ui`.
-pub async fn run(socket: PathBuf) -> Result<()> {
+/// Entry point for `guardian ui`. With `demo`, shows sample actions and never
+/// contacts a daemon (a preview of the cockpit).
+pub async fn run(socket: PathBuf, demo: bool) -> Result<()> {
     let client = DaemonClient::new(socket);
     let mut terminal = ratatui::init();
     let _ = execute!(stdout(), EnableMouseCapture);
 
-    let result = run_loop(&mut terminal, &client).await;
+    let result = run_loop(&mut terminal, &client, demo).await;
 
     let _ = execute!(stdout(), DisableMouseCapture);
     ratatui::restore();
     result
 }
 
-async fn run_loop(terminal: &mut DefaultTerminal, client: &DaemonClient) -> Result<()> {
+async fn run_loop(terminal: &mut DefaultTerminal, client: &DaemonClient, demo: bool) -> Result<()> {
     let mut app = App {
-        pending: Vec::new(),
+        pending: if demo { demo_pending() } else { Vec::new() },
         selected: 0,
         spinner: 0,
         status: "connecting...".to_string(),
         hits: Vec::new(),
         quit: false,
+        demo,
     };
     let mut events = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_millis(400));
@@ -94,6 +98,13 @@ async fn run_loop(terminal: &mut DefaultTerminal, client: &DaemonClient) -> Resu
 }
 
 async fn refresh(app: &mut App, client: &DaemonClient) {
+    if app.demo {
+        if app.selected >= app.pending.len() {
+            app.selected = app.pending.len().saturating_sub(1);
+        }
+        app.status = format!("demo - {} pending", app.pending.len());
+        return;
+    }
     match client.pending().await {
         Ok(pending) => {
             app.pending = pending;
@@ -133,8 +144,7 @@ async fn handle_event(event: Event, app: &mut App, client: &DaemonClient) {
                 }
             }
             if let Some((id, allow)) = action {
-                let _ = client.respond(id, allow).await;
-                refresh(app, client).await;
+                act_on(app, client, id, allow).await;
             }
         }
         _ => {}
@@ -152,17 +162,66 @@ fn move_selection(app: &mut App, delta: isize) {
 async fn resolve_selected(app: &mut App, client: &DaemonClient, allow: bool) {
     if let Some(item) = app.pending.get(app.selected) {
         let id = item.id;
-        let _ = client.respond(id, allow).await;
-        refresh(app, client).await;
+        act_on(app, client, id, allow).await;
     }
 }
 
 async fn panic_all(app: &mut App, client: &DaemonClient) {
     let ids: Vec<u64> = app.pending.iter().map(|p| p.id).collect();
     for id in ids {
-        let _ = client.respond(id, false).await;
+        act_on(app, client, id, false).await;
     }
-    refresh(app, client).await;
+}
+
+/// Resolve one action: locally (demo) or via the daemon (live).
+async fn act_on(app: &mut App, client: &DaemonClient, id: u64, allow: bool) {
+    if app.demo {
+        app.pending.retain(|p| p.id != id);
+        if app.selected >= app.pending.len() {
+            app.selected = app.pending.len().saturating_sub(1);
+        }
+        app.status = format!("demo - {} pending", app.pending.len());
+    } else {
+        let _ = client.respond(id, allow).await;
+        refresh(app, client).await;
+    }
+}
+
+/// Sample pending actions for `--demo` (varied risk to show the colors).
+fn demo_pending() -> Vec<PendingView> {
+    let mk = |id: u64, tool: &str, text: &str, risk: u8| PendingView {
+        id,
+        action_id: format!("act-{id}"),
+        tool: tool.to_string(),
+        plain_text: text.to_string(),
+        risk,
+    };
+    vec![
+        mk(
+            1,
+            "bank.transfer",
+            "The agent wants to move money (EUR 4,000 to an unknown account).",
+            92,
+        ),
+        mk(
+            2,
+            "shell.run",
+            "The agent wants to run a command: rm -rf ./build",
+            74,
+        ),
+        mk(
+            3,
+            "http.post",
+            "The agent wants to send a file to a site that is not on your trusted list.",
+            88,
+        ),
+        mk(
+            4,
+            "fs.read",
+            "The agent wants to read a note in your home folder.",
+            12,
+        ),
+    ]
 }
 
 fn draw(frame: &mut Frame, app: &mut App) {
@@ -375,7 +434,22 @@ mod tests {
             status: status.to_string(),
             hits: Vec::new(),
             quit: false,
+            demo: false,
         }
+    }
+
+    #[test]
+    fn demo_pending_has_varied_risk() {
+        let items = demo_pending();
+        assert_eq!(items.len(), 4);
+        assert!(
+            items.iter().any(|i| i.risk >= 80),
+            "expected a high-risk sample"
+        );
+        assert!(
+            items.iter().any(|i| i.risk < 40),
+            "expected a low-risk sample"
+        );
     }
 
     fn rendered(app: &mut App) -> String {
