@@ -1,0 +1,92 @@
+# Project Guardian — default policy pack
+# Role: "personal-assistant" — safe-by-default, used on first run (README §5.10).
+# Schema: docs/policy-schema.md. Decisions: allow | ask | deny.
+# Evaluation: most-restrictive-wins (deny > ask > allow); unknown actions -> defaults.
+
+version = 1
+role = "personal-assistant"
+
+[meta]
+description = "Restrictive default role. Unknown actions require human review."
+author = "Project Guardian"
+
+[defaults]
+decision = "ask"        # fail safe: anything not explicitly allowed is reviewed
+
+# ---------------------------------------------------------------------------
+# GREEN — silent, low-risk actions
+# ---------------------------------------------------------------------------
+
+[[rules]]
+id = "read-user-documents"
+when = 'action.kind == "FileRead" && action.context.path.startsWith(user.home)'
+decision = "allow"
+
+[[rules]]
+id = "http-get-trusted"
+when = 'action.kind == "HttpRequest" && action.args.method == "GET" && action.context.host in trusted_hosts'
+decision = "allow"
+
+# ---------------------------------------------------------------------------
+# YELLOW — pause and ask, with a plain-language explanation
+# ---------------------------------------------------------------------------
+
+[[rules]]
+id = "write-user-files"
+when = 'action.kind == "FileWrite" && action.context.path.startsWith(user.home)'
+decision = "ask"
+explain = "Creates or modifies files in your home folder."
+
+[[rules]]
+id = "exec-shell"
+when = 'action.kind == "Exec"'
+decision = "ask"
+sandbox = true          # also contained when sandbox backend is available
+explain = "Runs a shell command on your computer."
+
+[[rules]]
+id = "chmod-world-writable"
+when = 'action.kind == "Exec" && action.args.cmd.matches("chmod\\s+(777|o\\+w)")'
+decision = "ask"
+explain = "Makes files modifiable by any user on this machine."
+
+[[rules]]
+id = "send-email"
+when = 'action.kind == "Email"'
+decision = "ask"
+explain = "Sends an email on your behalf."
+
+[[rules]]
+id = "money-movement"
+when = 'action.capability == "Payment"'
+decision = "ask"
+critical = true         # never auto-downgraded by learning
+explain = "Sends money."
+[rules.cap]
+amount_max = 200.0
+currency = "EUR"
+
+[[rules]]
+id = "bulk-delete"
+when = 'action.kind == "Delete" && action.args.count > 10'
+decision = "ask"
+critical = true
+explain = "Deletes many items at once."
+
+# ---------------------------------------------------------------------------
+# RED — blocked automatically and reported
+# ---------------------------------------------------------------------------
+
+[[rules]]
+id = "data-exfiltration"
+when = 'action.kind == "HttpRequest" && action.args.method == "POST" && action.context.body.contains_secret && !(action.context.host in trusted_hosts)'
+decision = "deny"
+critical = true
+explain = "Tried to send a secret (password, key, or token) to an untrusted site."
+
+[[rules]]
+id = "access-credentials"
+when = 'action.capability == "Credential" && !(action.context.host in trusted_hosts)'
+decision = "deny"
+critical = true
+explain = "Tried to read stored credentials for an untrusted destination."

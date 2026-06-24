@@ -1,0 +1,15 @@
+[package]
+name = "guardian-policy"
+description = "Deterministic policy engine — the security boundary (allow/ask/deny)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+guardian-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+thiserror = { workspace = true }
+cel-interpreter = "0.10.0"

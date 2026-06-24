@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "Core capability for the main window. The app's own commands (pending, respond) are always allowed and need no permission.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

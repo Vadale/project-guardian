@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Guardian — Approvals</title>
+    <style>
+      :root { color-scheme: light dark; font-family: system-ui, -apple-system, sans-serif; }
+      body { margin: 0; padding: 1.25rem; background: #1113; }
+      h1 { font-size: 1.1rem; margin: 0 0 .25rem; }
+      #status { color: #888; font-size: .85rem; margin-bottom: 1rem; }
+      .card {
+        border: 1px solid #8884; border-radius: 10px; padding: .9rem 1rem;
+        margin-bottom: .75rem; background: #fff1; position: relative;
+      }
+      .badge {
+        position: absolute; top: .9rem; right: 1rem; color: #111;
+        font-size: .7rem; font-weight: 700; padding: .15rem .5rem; border-radius: 999px;
+      }
+      .tool { font-weight: 700; font-family: ui-monospace, monospace; margin-bottom: .3rem; }
+      .text { font-size: .95rem; margin-bottom: .8rem; max-width: 90%; }
+      .actions { display: flex; gap: .5rem; justify-content: flex-end; }
+      button { border: 0; border-radius: 8px; padding: .45rem .9rem; font-weight: 600; cursor: pointer; }
+      .allow { background: #2ecc71; color: #06321b; }
+      .deny  { background: #e74c3c; color: #3a0b06; }
+      .empty { color: #888; font-style: italic; }
+    </style>
+  </head>
+  <body>
+    <h1>🛡️ Guardian — Approvals</h1>
+    <div id="status">Connecting…</div>
+    <div id="queue"></div>
+    <script src="main.js"></script>
+  </body>
+</html>

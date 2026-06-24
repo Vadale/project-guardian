@@ -1,0 +1,20 @@
+[package]
+name = "guardian-audit"
+description = "Tamper-evident, hash-chained audit log."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+guardian-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+blake3 = "1.8.5"
+rusqlite = { version = "0.40.1", features = ["bundled"] }
+
+[features]
+# Placeholder for the future ed25519 signature over the chain head (the hook is
+# documented in lib.rs). Disabled by default; no behavior yet.
+signing = []
