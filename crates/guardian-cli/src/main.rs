@@ -48,6 +48,9 @@ enum Command {
         /// Path to the daemon's control socket (default: $GUARDIAN_SOCK or temp).
         #[arg(long)]
         daemon: Option<PathBuf>,
+        /// Preview the cockpit with sample actions; do not contact a daemon.
+        #[arg(long)]
+        demo: bool,
     },
     /// Run the internal red-team evaluation suite and print a scorecard.
     Eval,
@@ -65,11 +68,11 @@ async fn main() -> anyhow::Result<()> {
         Command::Demo => run_demo().await,
         Command::PolicyValidate { path } => validate_policy(&path),
         Command::Mcp { daemon } => run_mcp(daemon).await,
-        Command::Ui { daemon } => {
+        Command::Ui { daemon, demo } => {
             let socket = daemon
                 .or_else(|| std::env::var_os("GUARDIAN_SOCK").map(PathBuf::from))
                 .unwrap_or_else(|| std::env::temp_dir().join("guardian.sock"));
-            tui::run(socket).await
+            tui::run(socket, demo).await
         }
         Command::Eval => {
             eval::run_and_print();
