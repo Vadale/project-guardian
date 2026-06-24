@@ -1,0 +1,4 @@
+# Guardian × AgentDojo evaluation harness.
+# Pin agentdojo to the version you tested against (the API shifts between releases).
+agentdojo
+openai

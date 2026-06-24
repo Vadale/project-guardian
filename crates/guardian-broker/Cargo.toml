@@ -1,0 +1,9 @@
+[package]
+name = "guardian-broker"
+description = "Identity & token broker (scoped OAuth, macaroons, keychain) (Phase 3)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]

@@ -1,0 +1,27 @@
+[package]
+name = "guardian-cli"
+description = "The `guardian` command-line interface."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "guardian"
+path = "src/main.rs"
+
+[dependencies]
+guardian-core = { workspace = true }
+guardian-policy = { workspace = true }
+guardian-checker = { workspace = true }
+guardian-audit = { workspace = true }
+guardian-mcp-gateway = { workspace = true }
+guardian-daemon = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+async-trait = "0.1"
+clap = { version = "4", features = ["derive"] }
+ratatui = "0.29.0"
+crossterm = { version = "0.29.0", features = ["event-stream"] }
+futures = "0.3.32"

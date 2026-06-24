@@ -1,0 +1,41 @@
+# Rust / Cargo
+/target
+**/target/
+*.rs.bk
+# Keep Cargo.lock committed (this workspace builds binaries/apps).
+
+# Local runtime state (never commit user data or secrets)
+*.db
+*.db-wal
+*.db-shm
+*.log
+/.guardian/
+*.local.toml
+*.key
+*.pem
+.env
+.env.*
+
+# Node / Tauri UI
+ui/node_modules/
+ui/dist/
+ui/.svelte-kit/
+ui/src-tauri/target/
+
+# Editors / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Coverage / fuzz artifacts
+/coverage/
+fuzz/target/
+fuzz/corpus/
+fuzz/artifacts/
+
+# Python (evaluation harness)
+__pycache__/
+*.pyc
+.venv/
