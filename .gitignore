@@ -39,3 +39,10 @@ fuzz/artifacts/
 __pycache__/
 *.pyc
 .venv/
+
+# Tauri generated code
+ui/src-tauri/gen/
+
+# AgentDojo run logs (verbose per-episode traces)
+evaluation/agentdojo/runs/
+evaluation/agentdojo/runs_gemma/

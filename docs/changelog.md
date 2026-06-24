@@ -79,9 +79,11 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 - **Desktop UI scaffold** (ROADMAP Task 6.6) — [`ui/`](../ui): a Tauri v2 app whose
   backend exposes `pending`/`respond` commands bridging to the daemon socket via
   `DaemonClient`, with a static traffic-light frontend (polls pending; Allow/Deny).
-  No business logic in the UI. Its own cargo workspace, excluded from the main one;
-  not built in headless CI (needs the Tauri toolchain + a display), but the
-  `DaemonClient` bridge it relies on is tested in `guardian-daemon`.
+  No business logic in the UI. Its own cargo workspace, excluded from the main one.
+  Compiles with `cargo build` on macOS (placeholder RGBA icon); the static frontend
+  is themed to match the TUI (no emoji: bright green/red + dark-green accents, ASCII
+  risk bars). Running the window still needs a display; the `DaemonClient` bridge it
+  relies on is tested in `guardian-daemon`.
 - **Evaluation tooling** (`evaluation/`) — `guardian eval` runs an internal
   red-team suite (labeled actions → confusion matrix; release gate: **0 critical
   false negatives**) and prints a scorecard; on the current 14-case suite:
