@@ -10,6 +10,12 @@ Provides the human-in-the-loop **approval queue** that resolves the gateway's
 which enqueues the request and awaits the user's response — **failing closed**
 (Denied) if no response arrives in time.
 
+## Persistence (audit)
+The binary opens a **persistent** tamper-evident audit log at `GUARDIAN_AUDIT`
+(default `~/.guardian/audit.db`): the blake3 hash chain continues across restarts,
+and the daemon **verifies it on startup, refusing to start (fail closed) if the
+chain is broken/tampered**. (ed25519 head signing is a follow-up.)
+
 ## Public API
 - `ApprovalQueue::new(timeout)`.
 - `ApprovalQueue::request(action_id, tool, explanation) -> ApprovalResponse` —
