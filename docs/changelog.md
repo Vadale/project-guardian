@@ -8,6 +8,19 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 ## [Unreleased] — design phase
 
 ### Implemented — 2026-06-25
+- **Real Checker backend: `HttpChecker`** (ROADMAP §9b.4) — a model-backed advisory
+  Checker that POSTs the structured action to a configured HTTP endpoint and parses
+  an `Explanation` back; the daemon uses it when `checker_endpoint` /
+  `GUARDIAN_CHECKER` is set, else the offline `StubChecker` (privacy default, off).
+  **Advisory only (ADR-0003)** — the endpoint's reply only produces the human-facing
+  explanation/risk on an `ask`; it never reaches the allow/deny decision (verified
+  by the security audit). Infallible to the caller: any error (unreachable, non-2xx,
+  bad/oversize JSON) degrades to a conservative offline fallback, with a 10s timeout
+  and a **256 KB response-body cap** (no unbounded-allocation DoS). http-only (no
+  TLS) to keep the dependency/license surface small. Security-audit fixes applied:
+  body cap, a startup warning when the endpoint is non-local (the full action incl.
+  args is sent there) or `https`, and the URL is not logged (may embed credentials).
+  wiremock tests cover success/clamp + unreachable-fallback.
 - **Observability: structured logging** (ROADMAP §9b.5) — the daemon now uses
   `tracing` + `tracing-subscriber` (level via `RUST_LOG`, default `info`) instead
   of ad-hoc `println!`/`eprintln!`: startup events, a `tool`+`status` event per

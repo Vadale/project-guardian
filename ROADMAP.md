@@ -569,9 +569,13 @@ The MVP cuts corners that a real product cannot. These make the existing core
       effective value).
 - [ ] 9b.3 **Cross-platform IPC.** Windows named pipe alongside the Unix socket
       (via the `interprocess` crate) so the daemon/UI run on Windows too.
-- [ ] 9b.4 **Real Checker backends.** Ship `LocalChecker` (local model endpoint)
-      and an opt-in `RemoteChecker` behind config (Task 6.3), keeping `StubChecker`
-      for tests. Advisory-only — still never on the allow/deny path.
+- [~] 9b.4 **Real Checker backends.** **Done:** `HttpChecker` — POSTs the action to
+      a configured HTTP endpoint (`checker_endpoint`/`GUARDIAN_CHECKER`) and parses
+      an `Explanation`; daemon uses it when set, else the offline `StubChecker`
+      (privacy default). Advisory-only (never on the allow/deny path); infallible
+      (any error → conservative fallback), 10s timeout, 256 KB body cap; http-only.
+      **Remaining:** an HTTPS/TLS build option, optional arg redaction before POST,
+      and recording the Checker backend per audit entry ("per-action, logged").
 - [~] 9b.5 **Observability.** **Done:** `tracing` + `tracing-subscriber` (env-filter
       `RUST_LOG`, default `info`) wired through the daemon — structured operational
       logs (startup, per-call `tool`+`status`, invalid requests, failed kill-switch

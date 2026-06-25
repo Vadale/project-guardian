@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use guardian_audit::AuditLog;
-use guardian_checker::StubChecker;
+use guardian_checker::{Checker, HttpChecker, StubChecker};
 use guardian_daemon::config;
 use guardian_daemon::{serve, ApprovalQueue, Config, LocalToolsUpstream, QueueApprover};
 use guardian_mcp_gateway::{Gateway, SelfProtection};
@@ -111,11 +111,34 @@ async fn main() -> std::io::Result<()> {
     }
     let self_protection = SelfProtection::new(protected, Some(config::kill_switch_path()));
 
+    // Advisory Checker: an HTTP model endpoint if configured, else the offline
+    // StubChecker (privacy default). Never on the allow/deny path (ADR-0003).
+    let checker: Box<dyn Checker> = match cfg.checker_endpoint() {
+        Some(url) => {
+            if url.starts_with("https") {
+                tracing::warn!(
+                    "checker endpoint is https but this build has no TLS; it will fail and fall back to the offline checker"
+                );
+            }
+            let local =
+                url.contains("127.0.0.1") || url.contains("localhost") || url.contains("[::1]");
+            if !local {
+                tracing::warn!(
+                    "checker endpoint is non-local: the full action (including args) is sent there — ensure it is trusted"
+                );
+            }
+            // Don't log the URL itself — it may embed credentials.
+            tracing::info!(local, "advisory checker: HTTP model endpoint configured");
+            Box::new(HttpChecker::new(url))
+        }
+        None => Box::new(StubChecker),
+    };
+
     let gateway = Arc::new(
         Gateway::new(
             "daemon",
             policy,
-            Box::new(StubChecker),
+            checker,
             Box::new(approver),
             Box::new(LocalToolsUpstream),
             open_audit(cfg.audit_path()),

@@ -12,8 +12,15 @@ plus an advisory risk score, for human review of `ask` items.
   (async via `async-trait`, so it is object-safe — the daemon holds a
   `Box<dyn Checker>`).
 - `StubChecker` — a deterministic, offline backend (no model, no network). It is
-  the privacy default and the stable backend for tests. Model-backed local/remote
-  checkers plug in behind the same trait later.
+  the privacy default and the stable backend for tests.
+- `HttpChecker` — a model-backed backend: POSTs the action (JSON) to a configured
+  HTTP endpoint and parses an `Explanation` back. Suited to a **local** model
+  endpoint (http-only, no TLS, to keep the dependency/license surface small).
+  Advisory only and infallible: any error (unreachable, non-2xx, bad/oversize JSON)
+  degrades to a conservative offline fallback. Bounded by a 10s timeout and a
+  256 KB response-body cap. The daemon selects it via `checker_endpoint` /
+  `GUARDIAN_CHECKER`; the full action (incl. `args`) is sent to the endpoint, so
+  it must be trusted (the daemon warns when it is non-local or `https`).
 
 ## Invariants (ADR-0003)
 - **Advisory only.** `explain` returns an `Explanation`, never a `Decision`. The
