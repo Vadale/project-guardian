@@ -2,11 +2,13 @@
 //!
 //! Wires a policy, an offline `StubChecker`, the approval queue, and the local
 //! tools upstream into a [`Gateway`], then serves the newline-delimited JSON
-//! protocol over a Unix socket. Set `GUARDIAN_SOCK` to override the socket path
-//! and `GUARDIAN_POLICY` to load a policy file (defaults to the shipped pack).
+//! protocol over a Unix socket. Env overrides: `GUARDIAN_SOCK` (socket path),
+//! `GUARDIAN_POLICY` (policy file; defaults to the shipped pack), `GUARDIAN_AUDIT`
+//! (audit-log file; defaults to `~/.guardian/audit.db`).
 
 #![forbid(unsafe_code)]
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -47,6 +49,36 @@ fn load_policy() -> CompiledPolicy {
     }
 }
 
+/// Open the persistent audit log (`GUARDIAN_AUDIT`, else `~/.guardian/audit.db`)
+/// and verify its chain. Fail closed: refuse to start on a broken/tampered chain
+/// rather than append to a log whose integrity can no longer be vouched for.
+fn open_audit() -> AuditLog {
+    let path = match std::env::var("GUARDIAN_AUDIT") {
+        Ok(p) => PathBuf::from(p),
+        Err(_) => {
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+            let dir = PathBuf::from(home).join(".guardian");
+            std::fs::create_dir_all(&dir)
+                .unwrap_or_else(|e| panic!("cannot create {}: {e}", dir.display()));
+            dir.join("audit.db")
+        }
+    };
+    let log = AuditLog::open(&path)
+        .unwrap_or_else(|e| panic!("cannot open audit log {}: {e}", path.display()));
+    log.verify().unwrap_or_else(|e| {
+        panic!(
+            "audit log {} failed its integrity check ({e}); refusing to start",
+            path.display()
+        )
+    });
+    println!(
+        "guardian-daemon: audit log {} ({} entries, intact)",
+        path.display(),
+        log.len().unwrap_or(0)
+    );
+    log
+}
+
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     let policy = load_policy();
@@ -62,7 +94,7 @@ async fn main() -> std::io::Result<()> {
         Box::new(StubChecker),
         Box::new(approver),
         Box::new(LocalToolsUpstream),
-        AuditLog::open_in_memory().expect("audit log"),
+        open_audit(),
         env,
     ));
 

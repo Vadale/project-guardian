@@ -409,15 +409,14 @@ tamper-evident log — **with no LLM in the deny path**.
       deterministic deny. **Done** (`guardian hook` + `coding-agent` policy +
       `examples/claude-code/`). Maps native tools → Action; unrecognized tools are
       pinned to `Other` (never name-inferred → never auto-allow); fail-safe to `ask`.
-- [ ] 7.5 **MCP proxy generalization (connect to real harnesses & servers).**
-      Turn the stdio gateway into a true agent-agnostic MCP proxy: a generic
-      **upstream MCP client** (connect to arbitrary MCP servers, not the built-in
-      `LocalToolsUpstream`), **Streamable HTTP** transport in addition to stdio
-      (current spec, for remote agents/servers), **multi-server tool aggregation +
-      namespacing**, and — crucially — **safe classification of arbitrary tools**
-      (no name-inference fail-open; unknown tools → restrictive default; optional
-      per-server tool→capability map in the policy). Auth passthrough hook for
-      upstream servers (ties to the broker, §8.1).
+- [~] 7.5 **MCP proxy generalization (connect to real harnesses & servers).**
+      **Done (stdio):** generic upstream MCP client (`McpStdioUpstream`),
+      multi-server aggregation + `label__tool` namespacing (`MultiUpstream`),
+      safe classification (no name-inference fail-open; policy `[tools]` map), and
+      proxied `ask`s routed to the cockpit for human approval (`DaemonApprover`).
+      **Deferred but planned:** **Streamable HTTP** transport + **`rmcp`** adoption
+      (current spec, for remote/HTTP agents & servers — a dedicated ADR-gated step),
+      and the auth passthrough hook for upstream servers (ties to the broker, §8.1).
 
 > 🤖 **Reusable prompt — Task 7.1 (MITM proxy)**
 > ```
@@ -547,10 +546,12 @@ tamper-evident log — **with no LLM in the deny path**.
 The MVP cuts corners that a real product cannot. These make the existing core
 *operable and durable*, independent of the new-capability phases (2/3).
 
-- [ ] 9b.1 **Persist + sign the audit log in the daemon.** Today the daemon uses an
-      in-memory log (lost on restart). Write to a state dir (XDG / `Application
-      Support` / `%APPDATA%`); enable the feature-gated ed25519 head signature;
-      `verify()` on startup and refuse to run on a broken/forked chain (fail closed).
+- [~] 9b.1 **Persist + sign the audit log in the daemon.** **Done:** the daemon
+      opens a persistent SQLite log at `GUARDIAN_AUDIT` (default `~/.guardian/
+      audit.db`), continues the hash chain across restarts, and `verify()`s on
+      startup — refusing to start on a broken/forked chain (fail closed).
+      **Remaining:** the feature-gated ed25519 head signature, and a proper per-OS
+      state dir (XDG / `Application Support` / `%APPDATA%`) once config (§9b.2) lands.
 - [ ] 9b.2 **Configuration system + first-run defaults (README §5.10).** A real
       config file/dir for: policy path, `trusted_hosts`, approval timeout, socket
       path, log location, Checker backend. Replace the ad-hoc `GUARDIAN_*` env vars

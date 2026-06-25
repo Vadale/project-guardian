@@ -8,6 +8,14 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 ## [Unreleased] — design phase
 
 ### Implemented — 2026-06-25
+- **Daemon: persistent, verified audit log** (ROADMAP §9b.1) — the daemon no
+  longer keeps its tamper-evident log in memory (lost on restart). It opens a
+  SQLite file at `GUARDIAN_AUDIT` (default `~/.guardian/audit.db`), continues the
+  hash chain across restarts, and **verifies the chain on startup — failing closed
+  (refusing to start) if it is broken/tampered**, rather than appending to a log
+  whose integrity it can't vouch for. Verified by a live restart smoke (an entry
+  recorded in one run is present and intact after a restart). ed25519 head signing
+  remains a follow-up (§9b.1 / §9.2).
 - **MCP proxy: human approvals via the cockpit** — an `ask` on a *proxied* tool now
   reaches the human instead of failing closed. The daemon gains an `approve`
   control-socket request that enqueues into its `ApprovalQueue` (shown by the
