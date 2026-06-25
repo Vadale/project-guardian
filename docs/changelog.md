@@ -8,6 +8,22 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 ## [Unreleased] — design phase
 
 ### Implemented — 2026-06-25
+- **Daemon: configuration system + first-run defaults** (ROADMAP §9b.2) — a typed
+  `Config` (`guardian-daemon::config`) loaded from `GUARDIAN_CONFIG` (default
+  `~/.guardian/config.toml`) replaces the scattered env reads in `main`. Fields
+  (`socket`, `policy`, `audit`, `approval_timeout_secs`, `trusted_hosts`) are all
+  optional, so a missing/empty config yields safe defaults; per-value precedence is
+  **built-in default < config file < `GUARDIAN_*` env var** (`GUARDIAN_SOCK`/
+  `POLICY`/`AUDIT`). On first run it materializes a commented default config the
+  user can edit. Parsing is strict (`deny_unknown_fields`) and **fails closed** on a
+  malformed config (the daemon refuses to start rather than run half-understood).
+  Hardened per the code/security review: the first-run config is written
+  owner-only (0600, dir 0700), a `0` approval timeout is treated as unset (it would
+  otherwise deny every `ask`), and the effective `trusted_hosts` is logged at
+  startup (it exempts hosts from host-gated critical rules — routing it through the
+  critical-category opt-in is a tracked follow-up). Covered by config tests (safe
+  defaults, env-overlay precedence, first-run materialization, zero-timeout guard,
+  malformed rejected).
 - **Daemon: persistent, verified audit log** (ROADMAP §9b.1) — the daemon no
   longer keeps its tamper-evident log in memory (lost on restart). It opens a
   SQLite file at `GUARDIAN_AUDIT` (default `~/.guardian/audit.db`), continues the

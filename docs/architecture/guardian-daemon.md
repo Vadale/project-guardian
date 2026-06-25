@@ -10,13 +10,40 @@ Provides the human-in-the-loop **approval queue** that resolves the gateway's
 which enqueues the request and awaits the user's response — **failing closed**
 (Denied) if no response arrives in time.
 
+## Configuration (ROADMAP §9b.2)
+The binary is driven by a typed `Config` (`config.rs`), loaded with
+`Config::load()` from `GUARDIAN_CONFIG` (default `~/.guardian/config.toml`). All
+fields are optional, so a missing or empty config yields safe defaults:
+
+- `socket` — control-socket path (default: temp-dir `guardian.sock`).
+- `policy` — policy file (default: the built-in `personal-assistant` pack).
+- `audit` — audit-log file (default: `~/.guardian/audit.db`).
+- `approval_timeout_secs` — seconds before a pending approval fails closed
+  (default: 120).
+- `trusted_hosts` — hosts the policy treats as trusted (default: none).
+
+**Per-value precedence: built-in default < config file < `GUARDIAN_*` env var.**
+The resolver methods (`socket_path`, `policy_path`, `audit_path`,
+`approval_timeout`) overlay the matching env var (`GUARDIAN_SOCK`,
+`GUARDIAN_POLICY`, `GUARDIAN_AUDIT`) over the file value, so the env vars stay as
+ad-hoc overrides on top of the file.
+
+On **first run** (file absent) `load()` writes a commented default
+`config.toml` the user can edit and returns defaults. Parsing is strict
+(`#[serde(deny_unknown_fields)]`): a malformed config — bad type or unknown key —
+is a `ConfigError` and the daemon **fails closed**, refusing to start rather than
+run with a half-understood config.
+
 ## Persistence (audit)
-The binary opens a **persistent** tamper-evident audit log at `GUARDIAN_AUDIT`
-(default `~/.guardian/audit.db`): the blake3 hash chain continues across restarts,
-and the daemon **verifies it on startup, refusing to start (fail closed) if the
-chain is broken/tampered**. (ed25519 head signing is a follow-up.)
+The binary opens a **persistent** tamper-evident audit log at the configured audit
+path (`GUARDIAN_AUDIT` > config file > `~/.guardian/audit.db`): the blake3 hash
+chain continues across restarts, and the daemon **verifies it on startup, refusing
+to start (fail closed) if the chain is broken/tampered**. (ed25519 head signing is
+a follow-up.)
 
 ## Public API
+- `Config` + `Config::load()` / `Config::from_path()` and the resolver methods
+  (`socket_path`/`policy_path`/`audit_path`/`approval_timeout`) — see Configuration.
 - `ApprovalQueue::new(timeout)`.
 - `ApprovalQueue::request(action_id, tool, explanation) -> ApprovalResponse` —
   enqueue and await; returns `Denied` on timeout.
