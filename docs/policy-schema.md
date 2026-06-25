@@ -47,6 +47,23 @@ currency = "EUR"
 | `role` | string | yes | Unique role name (e.g. `personal-assistant`, `web-developer`). |
 | `defaults.decision` | enum | yes | Decision when no rule matches. Must be `ask` or `deny` (never `allow`). |
 | `[meta]` | table | no | Free-form: author, description, pack id/version (set by signing). |
+| `[tools]` | table | no | Trusted `tool name → ActionKind` map for the MCP proxy (see §2.1). |
+
+### 2.1 `[tools]` — trusted classification for the MCP proxy
+When Guardian proxies an upstream MCP server (`guardian mcp --upstream …`), the
+upstream's tool names are **untrusted** and must not drive an `allow` by name
+inference. The `[tools]` table lets the policy (a trusted source) declare how to
+classify specific tools; a tool **not** listed is `Other` — the restrictive
+default. Values are `ActionKind`s (`FileRead`, `FileWrite`, `Exec`, `HttpRequest`,
+`Email`, `Payment`, `Delete`, `Other`).
+
+```toml
+[tools]
+read_file  = "FileRead"     # now eligible for a FileRead allow rule (green fast-path)
+list_dir   = "FileRead"
+run_query  = "Exec"         # treated as a shell/exec action
+# anything not listed → Other → falls to the restrictive default (ask/deny)
+```
 
 ## 3. Rule fields (`[[rules]]`)
 | Field | Type | Required | Meaning |

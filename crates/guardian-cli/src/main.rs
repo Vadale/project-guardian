@@ -468,22 +468,24 @@ async fn run_mcp(
     upstream: Option<String>,
     policy: Option<PathBuf>,
 ) -> anyhow::Result<()> {
-    // Proxy mode: front a real upstream MCP server. Its tools are UNTRUSTED, so we
-    // attach no classifier — every tool is `Other` (restrictive default) until the
-    // user's policy/config trusts it explicitly (no name-inference fail-open).
+    // Proxy mode: front a real upstream MCP server. Its tools are UNTRUSTED, so the
+    // classifier comes only from the policy's `[tools]` map — a tool the policy does
+    // not classify is `Other` (restrictive default), never inferred from its name.
     if let Some(command) = upstream {
         let mut parts = command.split_whitespace();
         let program = parts
             .next()
             .ok_or_else(|| anyhow::anyhow!("--upstream command is empty"))?;
         let args: Vec<String> = parts.map(String::from).collect();
+        let compiled = load_policy(&policy)?;
+        let classifier = compiled.policy().tools.clone();
         let up = guardian_mcp_gateway::upstream::McpStdioUpstream::spawn(program, &args)
             .await
             .map_err(|e| anyhow::anyhow!("upstream MCP server: {e}"))?;
         let tools = up.tools();
         let gateway = Gateway::new(
             "guardian-mcp-proxy",
-            load_policy(&policy)?,
+            compiled,
             Box::new(StubChecker),
             Box::new(DenyAsksApprover),
             Box::new(up),
@@ -491,6 +493,7 @@ async fn run_mcp(
             eval_env(),
         );
         McpServer::new(Box::new(gateway), tools)
+            .with_classifier(classifier)
             .serve_stdio()
             .await?;
         return Ok(());
@@ -522,20 +525,24 @@ async fn run_mcp(
         )),
     };
 
-    // Trusted classification for Guardian's own tools (the gateway no longer
-    // infers an allow-eligible kind from a tool name — unmapped tools are `Other`).
-    let classifier = std::collections::HashMap::from([
+    // The daemon-bridge and local modes advertise Guardian's own fixed tools, so
+    // they use the built-in classification (not a name heuristic, not policy-driven).
+    McpServer::new(router, tools)
+        .with_classifier(builtin_classifier())
+        .serve_stdio()
+        .await?;
+    Ok(())
+}
+
+/// Trusted classification for Guardian's own built-in MCP tools.
+fn builtin_classifier() -> std::collections::HashMap<String, ActionKind> {
+    std::collections::HashMap::from([
         ("read_file".to_string(), ActionKind::FileRead),
         ("write_file".to_string(), ActionKind::FileWrite),
         ("http_request".to_string(), ActionKind::HttpRequest),
         ("run_shell".to_string(), ActionKind::Exec),
         ("send_email".to_string(), ActionKind::Email),
-    ]);
-    McpServer::new(router, tools)
-        .with_classifier(classifier)
-        .serve_stdio()
-        .await?;
-    Ok(())
+    ])
 }
 
 #[cfg(test)]

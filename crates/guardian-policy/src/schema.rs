@@ -2,8 +2,9 @@
 //! `docs/policy-schema.md`). This module only parses and structurally validates;
 //! CEL compilation lives in [`crate::CompiledPolicy`].
 
+use guardian_core::ActionKind;
 use serde::Deserialize;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
 /// A policy decision as written in a rule.
@@ -66,6 +67,12 @@ pub struct Policy {
     /// Optional informational metadata (author, description, pack id/version).
     #[serde(default)]
     pub meta: Option<toml::Value>,
+    /// Optional trusted classification for proxied / MCP tools: `tool name → kind`.
+    /// The MCP proxy uses this instead of inferring a kind from the (untrusted)
+    /// tool name; an unmapped tool is `Other` (the restrictive default). Lets a
+    /// policy declare which upstream tools are safe to treat as e.g. `FileRead`.
+    #[serde(default)]
+    pub tools: HashMap<String, ActionKind>,
     #[serde(default)]
     pub rules: Vec<Rule>,
 }
