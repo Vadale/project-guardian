@@ -40,9 +40,25 @@ error (`-32000`, "Blocked by Guardian: …"), an upstream failure returns a resu
 with `isError: true`. `serve_stdio()` runs it; `handle_line()` is the testable
 core. A real MCP client (any harness) can launch `guardian mcp`.
 
+**Trusted classification (`with_classifier`).** `McpServer` classifies each
+`tools/call` via a trusted `tool-name → ActionKind` map. A tool **not** in the map
+is `Other` (the restrictive default) — never inferred from its (untrusted) name,
+so a proxied/upstream tool cannot fail open to `allow` (cross-cutting gate §11.8).
+
+## MCP proxy: upstream client (`upstream` module)
+`upstream::McpStdioUpstream` is a generic MCP **client** over stdio: it spawns a
+real MCP server as a child process, does the `initialize`/`notifications/
+initialized` handshake, discovers its tools (`tools/list`), and implements
+`Upstream` by forwarding `tools/call`s. Requests are serialized (one in flight).
+Wiring it as a `Gateway`'s `Upstream` (with the upstream's tools re-advertised and
+no classifier) turns the gateway into a real **proxy** — `guardian mcp --upstream
+"<command>"`. The upstream's tools are untrusted, so everything is `Other` until
+the policy trusts it explicitly.
+
 ## Scope
-The gateway logic is transport-agnostic; the `mcp` module is the first real
-transport. Connecting to a separate downstream MCP server as the `Upstream`
-(a true proxy) is a follow-up. Fully tested with a fake upstream (allow forwards,
-deny blocks, ask waits, decisions recorded and verified) plus the MCP
-handshake/list/call/deny. `#![forbid(unsafe_code)]`.
+The gateway logic is transport-agnostic; `mcp` (server) and `upstream` (client)
+are the stdio transports. **Next:** Streamable HTTP + `rmcp`, and multi-server tool
+aggregation with namespacing (ROADMAP §7.5). Tested with a fake upstream (allow
+forwards, deny blocks, ask waits, decisions recorded and verified), the MCP
+handshake/list/call/deny, the unmapped-tool fail-safe, and `parse_tools`.
+`#![forbid(unsafe_code)]`.

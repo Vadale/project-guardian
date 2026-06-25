@@ -12,8 +12,12 @@ harness / tool-call / MCP boundary**, and enforces a **deterministic** policy
 (allow / ask / deny). A separate "Checker" model only *translates and risk-scores*
 pending actions into plain language — it never decides. Local-first, tamper-evident.
 
-**Status:** design complete (`README.md`, `ROADMAP.md`); no code yet. Next step =
-Phase 0 scaffold (ROADMAP Task 0.1/0.2) then the action model (Task 4.1).
+**Status:** working MVP (Phase 0 done; Phase 1 substantially done; CI green:
+fmt/clippy/test/cargo-deny). Built: policy engine, action model, audit, gateway,
+daemon, CLI, TUI cockpit, Tauri scaffold, and the Claude Code `PreToolUse` hook
+(Task 7.4). Next phases (see ROADMAP **Status snapshot** + §7.5/§9b): the MCP
+proxy generalization, productionization (persisted/signed audit, config, IPC),
+then the network proxy / sandbox / broker. See `ROADMAP.md` for the full plan.
 
 ## Where the detail lives (don't duplicate it here)
 - `README.md` — full spec, design principles, the OS-vs-harness decision (§4),
