@@ -8,6 +8,15 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 ## [Unreleased] — design phase
 
 ### Implemented — 2026-06-25
+- **MCP proxy: human approvals via the cockpit** — an `ask` on a *proxied* tool now
+  reaches the human instead of failing closed. The daemon gains an `approve`
+  control-socket request that enqueues into its `ApprovalQueue` (shown by the
+  cockpit's `pending`, resolved by `respond`) and blocks until resolved (or times
+  out → denied). A new `DaemonApprover` in the CLI routes the proxy's `ask`
+  decisions there: `guardian mcp --upstream "<cmd>" --daemon <socket>` proxies an
+  upstream MCP server *and* sends its `ask`s to the cockpit, while the proxy keeps
+  owning the upstream connection. Verified by a daemon integration test and a live
+  3-process run (proxy → daemon queue → cockpit approve → forwarded to upstream).
 - **MCP proxy: multi-server aggregation + namespacing** (ROADMAP §7.5, step 4) —
   `upstream::MultiUpstream` fronts several upstream MCP servers behind one
   Guardian. `guardian mcp --upstream` is now repeatable (`[label=]command args`);

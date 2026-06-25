@@ -35,10 +35,13 @@ Each connection is handled in its own task, so a `call` blocked on approval neve
 prevents a `respond` on another connection from resolving it.
 
 Requests (`{"cmd": ...}`): `call` (tool/args/kind?/capability?), `pending`,
-`respond` (id, approve), `verify_audit`. Responses (`{"result": ...}`): `outcome`
-(status allowed/blocked/upstream_error + detail), `pending` (items), `responded`
-(ok), `audit` (entries, intact), `error` (message). `GUARDIAN_SOCK` overrides the
-socket path. Unix-only for now; Windows named-pipe support is a follow-up.
+`respond` (id, approve), `approve` (action_id?/tool/plain_text?/risk? — enqueue an
+approval and block until the cockpit resolves it; used by an external proxy to
+borrow this daemon's queue + cockpit), `verify_audit`. Responses (`{"result":
+...}`): `outcome` (status allowed/blocked/upstream_error + detail), `pending`
+(items), `responded` (ok), `approval` (approved), `audit` (entries, intact),
+`error` (message). `GUARDIAN_SOCK` overrides the socket path. Unix-only for now;
+Windows named-pipe support is a follow-up.
 
 ## Tests
 Unit: approve, deny, fail-closed timeout, unknown-id, `QueueApprover` routing.

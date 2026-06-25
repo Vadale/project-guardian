@@ -453,6 +453,36 @@ impl Approver for DenyAsksApprover {
     }
 }
 
+/// Routes `ask` decisions to a running daemon's approval queue (and its cockpit),
+/// so a human can approve a proxied tool call. Fails closed (Denied) on a denial
+/// or any socket error.
+struct DaemonApprover {
+    client: guardian_daemon::DaemonClient,
+}
+
+#[async_trait]
+impl Approver for DaemonApprover {
+    async fn request_approval(
+        &self,
+        action: &Action,
+        explanation: &Explanation,
+    ) -> ApprovalResponse {
+        match self
+            .client
+            .approve(
+                action.id.as_str(),
+                &action.tool,
+                &explanation.plain_text,
+                explanation.risk,
+            )
+            .await
+        {
+            Ok(true) => ApprovalResponse::Approved,
+            _ => ApprovalResponse::Denied,
+        }
+    }
+}
+
 fn tool_spec(name: &str, description: &str) -> ToolSpec {
     ToolSpec {
         name: name.to_string(),
@@ -500,11 +530,18 @@ async fn run_mcp(
         let compiled = load_policy(&policy)?;
         let classifier = compiled.policy().tools.clone();
         let tools = multi.tools();
+        // With --daemon, route `ask`s to its cockpit; otherwise fail closed.
+        let approver: Box<dyn Approver> = match &daemon {
+            Some(socket) => Box::new(DaemonApprover {
+                client: guardian_daemon::DaemonClient::new(socket.clone()),
+            }),
+            None => Box::new(DenyAsksApprover),
+        };
         let gateway = Gateway::new(
             "guardian-mcp-proxy",
             compiled,
             Box::new(StubChecker),
-            Box::new(DenyAsksApprover),
+            approver,
             Box::new(multi),
             AuditLog::open_in_memory()?,
             eval_env(),
