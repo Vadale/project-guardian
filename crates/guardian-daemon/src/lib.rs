@@ -232,6 +232,8 @@ mod server {
             #[serde(default)]
             risk: u8,
         },
+        /// Engage/disengage the emergency kill switch (a deny-all sentinel file).
+        KillSwitch { engage: bool },
         /// Report audit-log status.
         VerifyAudit,
     }
@@ -252,6 +254,9 @@ mod server {
         },
         Approval {
             approved: bool,
+        },
+        KillSwitch {
+            engaged: bool,
         },
         Audit {
             entries: u64,
@@ -390,6 +395,26 @@ mod server {
                     approved: resolution == ApprovalResponse::Approved,
                 }
             }
+            Request::KillSwitch { engage } => {
+                let path = crate::config::kill_switch_path();
+                if engage {
+                    if let Some(dir) = path.parent() {
+                        let _ = std::fs::create_dir_all(dir);
+                    }
+                    // The panic button must be loud if it fails to engage.
+                    if let Err(e) = std::fs::write(&path, "engaged\n") {
+                        eprintln!(
+                            "guardian-daemon: FAILED to engage kill switch ({}): {e}",
+                            path.display()
+                        );
+                    }
+                } else {
+                    let _ = std::fs::remove_file(&path);
+                }
+                Response::KillSwitch {
+                    engaged: path.exists(),
+                }
+            }
             Request::VerifyAudit => Response::Audit {
                 entries: gateway.audit_len(),
                 intact: gateway.audit_verify().is_ok(),
@@ -465,6 +490,17 @@ mod server {
             let value = self.rpc(&request.to_string()).await?;
             Ok(value
                 .get("approved")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false))
+        }
+
+        /// Engage/disengage the emergency kill switch; returns the resulting state.
+        pub async fn kill_switch(&self, engage: bool) -> std::io::Result<bool> {
+            let value = self
+                .rpc(&format!(r#"{{"cmd":"kill_switch","engage":{engage}}}"#))
+                .await?;
+            Ok(value
+                .get("engaged")
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false))
         }

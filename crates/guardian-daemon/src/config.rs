@@ -67,6 +67,15 @@ pub fn config_path() -> PathBuf {
     }
 }
 
+/// The kill-switch sentinel file: a `STOP` file next to the config. While it
+/// exists, the gateway denies every action (emergency stop).
+pub fn kill_switch_path() -> PathBuf {
+    config_path()
+        .parent()
+        .map(|d| d.join("STOP"))
+        .unwrap_or_else(|| guardian_dir().join("STOP"))
+}
+
 const DEFAULT_CONFIG_TEMPLATE: &str = r#"# Project Guardian — daemon config.
 # All fields are optional; the matching GUARDIAN_* env var overrides the file.
 # socket = "/tmp/guardian.sock"
@@ -225,6 +234,14 @@ mod tests {
         assert!(c.trusted_hosts.is_empty()); // safe defaults
         std::env::remove_var("GUARDIAN_CONFIG");
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn kill_switch_lives_next_to_the_config() {
+        let _g = ENV_LOCK.lock().unwrap();
+        std::env::set_var("GUARDIAN_CONFIG", "/tmp/guardiantest/config.toml");
+        assert_eq!(kill_switch_path(), PathBuf::from("/tmp/guardiantest/STOP"));
+        std::env::remove_var("GUARDIAN_CONFIG");
     }
 
     #[test]

@@ -8,6 +8,19 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 ## [Unreleased] — design phase
 
 ### Implemented — 2026-06-25
+- **Self-protection + kill switch** (ROADMAP §9b.6) — the gateway now applies a
+  deterministic hard override **before** the policy (recorded to the audit log):
+  a **kill switch** (while a `STOP` sentinel next to the config exists, every
+  action is denied) and **self-protection** (deny `FileWrite`/`Delete` targeting
+  Guardian's own files — config, policy, audit, socket, `STOP`, `~/.guardian` —
+  with paths normalized so `..`/relative can't evade the prefix). Daemon gains a
+  `kill_switch` control command (+ `DaemonClient::kill_switch`). Reviewed by
+  code-reviewer + security-auditor; fixes applied (path normalization + adversarial
+  tests, `STOP` added to the protected set, loud-fail on a failed engage). **Known
+  follow-ups (tracked, §9b.6):** the agent and user still share one control socket
+  (channel separation needed so the agent can't toggle the switch / self-approve),
+  and `Exec` can still reach Guardian's files (needs the OS sandbox, §7.3) — so the
+  kill switch is effective on the mediated file path but not yet fully agent-proof.
 - **Daemon: configuration system + first-run defaults** (ROADMAP §9b.2) — a typed
   `Config` (`guardian-daemon::config`) loaded from `GUARDIAN_CONFIG` (default
   `~/.guardian/config.toml`) replaces the scattered env reads in `main`. Fields
