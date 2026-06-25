@@ -8,6 +8,13 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 ## [Unreleased] — design phase
 
 ### Implemented — 2026-06-25
+- **Observability: structured logging** (ROADMAP §9b.5) — the daemon now uses
+  `tracing` + `tracing-subscriber` (level via `RUST_LOG`, default `info`) instead
+  of ad-hoc `println!`/`eprintln!`: startup events, a `tool`+`status` event per
+  mediated call, invalid-request warnings, and a loud `error!` if the kill switch
+  fails to engage. This is **operational** logging, deliberately separate from the
+  tamper-evident audit log, and logs no secrets or request bodies (reviewed by
+  code-reviewer). Remaining: optional metrics + tracing in the proxy front-ends.
 - **Self-protection + kill switch** (ROADMAP §9b.6) — the gateway now applies a
   deterministic hard override **before** the policy (recorded to the audit log):
   a **kill switch** (while a `STOP` sentinel next to the config exists, every

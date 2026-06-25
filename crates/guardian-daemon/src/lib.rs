@@ -310,9 +310,12 @@ mod server {
             }
             let response = match serde_json::from_str::<Request>(&line) {
                 Ok(request) => dispatch(request, &gateway, &queue).await,
-                Err(e) => Response::Error {
-                    message: format!("invalid request: {e}"),
-                },
+                Err(e) => {
+                    tracing::warn!(error = %e, "invalid control request");
+                    Response::Error {
+                        message: format!("invalid request: {e}"),
+                    }
+                }
             };
             let mut encoded = serde_json::to_string(&response)
                 .unwrap_or_else(|_| r#"{"result":"error","message":"encode failed"}"#.to_string());
@@ -340,7 +343,15 @@ mod server {
                     kind,
                     capability,
                 };
-                match gateway.handle(call).await {
+                let tool = call.tool.clone();
+                let outcome = gateway.handle(call).await;
+                let status = match &outcome {
+                    GatewayOutcome::Allowed(_) => "allowed",
+                    GatewayOutcome::Blocked(_) => "blocked",
+                    GatewayOutcome::UpstreamError(_) => "upstream_error",
+                };
+                tracing::info!(%tool, status, "tool call mediated");
+                match outcome {
                     GatewayOutcome::Allowed(detail) => Response::Outcome {
                         status: "allowed".to_string(),
                         detail,
@@ -403,10 +414,7 @@ mod server {
                     }
                     // The panic button must be loud if it fails to engage.
                     if let Err(e) = std::fs::write(&path, "engaged\n") {
-                        eprintln!(
-                            "guardian-daemon: FAILED to engage kill switch ({}): {e}",
-                            path.display()
-                        );
+                        tracing::error!(path = %path.display(), error = %e, "FAILED to engage kill switch");
                     }
                 } else {
                     let _ = std::fs::remove_file(&path);

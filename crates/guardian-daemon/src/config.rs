@@ -100,11 +100,12 @@ impl Config {
             match std::fs::write(&path, DEFAULT_CONFIG_TEMPLATE) {
                 Ok(()) => {
                     restrict_permissions(&path, 0o600);
-                    println!("guardian-daemon: wrote default config {}", path.display());
+                    tracing::info!(path = %path.display(), "wrote default config");
                 }
-                Err(e) => eprintln!(
-                    "guardian-daemon: could not write default config {} ({e}); using defaults",
-                    path.display()
+                Err(e) => tracing::warn!(
+                    path = %path.display(),
+                    error = %e,
+                    "could not write default config; using defaults"
                 ),
             }
             return Ok(Self::default());
