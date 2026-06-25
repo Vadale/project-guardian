@@ -1,0 +1,84 @@
+# Project Guardian — coding-agent policy pack
+# Role: "coding-agent" — tuned for an autonomous coding agent (e.g. Claude Code)
+# behind the `guardian hook` PreToolUse adapter or the MCP gateway.
+# Schema: docs/policy-schema.md. Decisions: allow | ask | deny.
+# Evaluation: most-restrictive-wins (deny > ask > allow); unknown actions -> defaults.
+
+version = 1
+role = "coding-agent"
+
+[meta]
+description = "For an autonomous coding agent. Reads are silent; writes and shell ask; destructive shell is denied. The data-exfiltration and credential rules below become enforceable once the network proxy (Phase 2) populates request bodies and the credential capability."
+author = "Project Guardian"
+
+[defaults]
+decision = "ask"        # fail safe: anything not explicitly classified is reviewed
+
+# ---------------------------------------------------------------------------
+# GREEN — silent, low-risk actions
+# ---------------------------------------------------------------------------
+
+[[rules]]
+id = "read-files"
+when = 'action.kind == "FileRead"'
+decision = "allow"
+
+[[rules]]
+id = "http-get-trusted"
+when = 'action.kind == "HttpRequest" && action.args.method == "GET" && action.context.host in trusted_hosts'
+decision = "allow"
+
+# ---------------------------------------------------------------------------
+# YELLOW — pause and ask, with a plain-language explanation
+# ---------------------------------------------------------------------------
+
+[[rules]]
+id = "write-files"
+when = 'action.kind == "FileWrite"'
+decision = "ask"
+explain = "Creates or modifies a file."
+
+[[rules]]
+id = "run-shell"
+when = 'action.kind == "Exec"'
+decision = "ask"
+sandbox = true          # also contained when a sandbox backend is available
+explain = "Runs a shell command on your computer."
+
+# ---------------------------------------------------------------------------
+# RED — blocked automatically and reported
+# ---------------------------------------------------------------------------
+
+# Obvious catastrophes: rm -rf of a root/home/glob, fork bomb, pipe-to-shell,
+# filesystem wipes. Subtler commands fall through to "run-shell" (ask).
+[[rules]]
+id = "destructive-shell"
+when = 'action.kind == "Exec" && action.args.cmd.matches("rm\\s+(-[a-zA-Z]+\\s+)*(/|~|\\$HOME)(\\s|$|\\*)|:\\(\\)\\s*\\{|(curl|wget)\\s[^|]*\\|\\s*(ba)?sh|mkfs|dd\\s+if=.*of=/dev/")'
+decision = "deny"
+critical = true
+explain = "Looks like a destructive or remote-code-execution shell command."
+
+# NOTE: the next two rules need request-body inspection / credential capability,
+# which the network proxy (Phase 2) provides. Until then they cannot match, so
+# such actions fall through to the restrictive default (ask) — fail safe, not open.
+[[rules]]
+id = "data-exfiltration"
+when = 'action.kind == "HttpRequest" && action.args.method == "POST" && action.context.body.contains_secret && !(action.context.host in trusted_hosts)'
+decision = "deny"
+critical = true
+explain = "Tried to send a secret (password, key, or token) to an untrusted site."
+
+[[rules]]
+id = "access-credentials"
+when = 'action.capability == "Credential" && !(action.context.host in trusted_hosts)'
+decision = "deny"
+critical = true
+explain = "Tried to read stored credentials for an untrusted destination."
+
+# Money movement stays critical even for a coding agent (never auto-downgraded).
+[[rules]]
+id = "money-movement"
+when = 'action.capability == "Payment"'
+decision = "ask"
+critical = true
+explain = "Sends money."

@@ -46,3 +46,8 @@ ui/src-tauri/gen/
 # AgentDojo run logs (verbose per-episode traces)
 evaluation/agentdojo/runs/
 evaluation/agentdojo/runs_gemma/
+evaluation/agentdojo/runs_e2b/
+evaluation/agentdojo/runs_smoke/
+evaluation/agentdojo/runs_smoke2/
+# Generated scorecards / scratch run outputs (results live in docs/memory)
+evaluation/agentdojo/*.json
