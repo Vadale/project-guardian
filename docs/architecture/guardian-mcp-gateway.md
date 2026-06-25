@@ -51,9 +51,15 @@ real MCP server as a child process, does the `initialize`/`notifications/
 initialized` handshake, discovers its tools (`tools/list`), and implements
 `Upstream` by forwarding `tools/call`s. Requests are serialized (one in flight).
 Wiring it as a `Gateway`'s `Upstream` (with the upstream's tools re-advertised and
-no classifier) turns the gateway into a real **proxy** — `guardian mcp --upstream
-"<command>"`. The upstream's tools are untrusted, so everything is `Other` until
-the policy trusts it explicitly.
+the classifier coming from the policy's `[tools]` map) turns the gateway into a
+real **proxy** — `guardian mcp --upstream "<command>"`. The upstream's tools are
+untrusted, so a tool the policy does not classify is `Other` until trusted.
+
+`upstream::MultiUpstream` fronts **several** servers behind one Guardian: tools are
+aggregated and **namespaced** `label__tool` (`namespaced_name`), and a `tools/call`
+is routed to the owning server with the namespace stripped (`route`, which falls
+back to an unlabeled server for raw names). `guardian mcp --upstream` is repeatable
+(`[label=]command`).
 
 ## Scope
 The gateway logic is transport-agnostic; `mcp` (server) and `upstream` (client)
