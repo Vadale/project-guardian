@@ -30,9 +30,11 @@ front-end over the other crates — no policy logic of its own.
   runs Guardian as an MCP server over stdio. `--upstream` is **repeatable**: it
   **proxies** one or more real MCP servers (spawns them, aggregates and namespaces
   their tools `label__tool`, mediates every call; the policy `[tools]` map provides
-  trusted classification, otherwise `ask`/`deny`). With `--daemon`, bridges to a
-  running daemon so `ask` reaches the cockpit (`DaemonRouter`). With neither, a
-  self-contained gateway over the built-in tools whose `ask` decisions fail closed.
+  trusted classification, otherwise `ask`/`deny`). Combining `--upstream` **and**
+  `--daemon` routes the proxy's `ask`s to that daemon's cockpit for human approval
+  (`DaemonApprover`) — the proxy keeps owning the upstream. With `--daemon` alone,
+  bridges to a running daemon (`DaemonRouter`). With neither, a self-contained
+  gateway over the built-in tools whose `ask` decisions fail closed.
 - **`ui [--daemon <socket>] [--demo]`** — the terminal cockpit (see below).
 
 ## Terminal cockpit (`src/tui.rs`)

@@ -190,6 +190,7 @@ mod server {
     use std::path::Path;
     use std::sync::Arc;
 
+    use guardian_checker::Explanation;
     use guardian_core::{ActionKind, Capability};
     use guardian_mcp_gateway::{Gateway, GatewayOutcome, ToolCall, ToolRouter};
     use serde::{Deserialize, Serialize};
@@ -216,6 +217,18 @@ mod server {
         Pending,
         /// Resolve a pending approval.
         Respond { id: u64, approve: bool },
+        /// Enqueue an approval request and block until the cockpit resolves it (or
+        /// it times out → denied). Used by an external proxy to route its `ask`s to
+        /// this daemon's queue + cockpit, while it keeps its own upstream.
+        Approve {
+            #[serde(default)]
+            action_id: String,
+            tool: String,
+            #[serde(default)]
+            plain_text: String,
+            #[serde(default)]
+            risk: u8,
+        },
         /// Report audit-log status.
         VerifyAudit,
     }
@@ -233,6 +246,9 @@ mod server {
         },
         Responded {
             ok: bool,
+        },
+        Approval {
+            approved: bool,
         },
         Audit {
             entries: u64,
@@ -355,6 +371,22 @@ mod server {
                     ok: queue.respond(id, response),
                 }
             }
+            Request::Approve {
+                action_id,
+                tool,
+                plain_text,
+                risk,
+            } => {
+                let explanation = Explanation {
+                    plain_text,
+                    risk,
+                    rationale: String::new(),
+                };
+                let resolution = queue.request(action_id, tool, explanation).await;
+                Response::Approval {
+                    approved: resolution == ApprovalResponse::Approved,
+                }
+            }
             Request::VerifyAudit => Response::Audit {
                 entries: gateway.audit_len(),
                 intact: gateway.audit_verify().is_ok(),
@@ -407,6 +439,29 @@ mod server {
                 .await?;
             Ok(value
                 .get("ok")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false))
+        }
+
+        /// Enqueue an approval request and block until the cockpit resolves it
+        /// (or it times out → denied). Used by a proxy to route its `ask`s here.
+        pub async fn approve(
+            &self,
+            action_id: &str,
+            tool: &str,
+            plain_text: &str,
+            risk: u8,
+        ) -> std::io::Result<bool> {
+            let request = serde_json::json!({
+                "cmd": "approve",
+                "action_id": action_id,
+                "tool": tool,
+                "plain_text": plain_text,
+                "risk": risk,
+            });
+            let value = self.rpc(&request.to_string()).await?;
+            Ok(value
+                .get("approved")
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false))
         }
@@ -608,6 +663,42 @@ decision = "ask"
             assert!(responded.contains(r#""ok":true"#), "got {responded}");
             let outcome = call.await.unwrap();
             assert!(outcome.contains(r#""status":"allowed""#), "got {outcome}");
+        }
+
+        #[tokio::test]
+        async fn approve_request_enqueues_and_resolves() {
+            let path = start().await;
+            // An external `approve` request blocks until the cockpit resolves it.
+            let approve_path = path.clone();
+            let approve = tokio::spawn(async move {
+                rpc(
+                    &approve_path,
+                    r#"{"cmd":"approve","tool":"x__write","plain_text":"writes a file","risk":40}"#,
+                )
+                .await
+            });
+            // It must appear in `pending`; resolve it approved.
+            let id = loop {
+                let pending = rpc(&path, r#"{"cmd":"pending"}"#).await;
+                if let Some(idx) = pending.find(r#""id":"#) {
+                    let rest = &pending[idx + 5..];
+                    let end = rest
+                        .find(|c: char| !c.is_ascii_digit())
+                        .unwrap_or(rest.len());
+                    if end > 0 {
+                        break rest[..end].parse::<u64>().unwrap();
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            };
+            let responded = rpc(
+                &path,
+                &format!(r#"{{"cmd":"respond","id":{id},"approve":true}}"#),
+            )
+            .await;
+            assert!(responded.contains(r#""ok":true"#), "got {responded}");
+            let outcome = approve.await.unwrap();
+            assert!(outcome.contains(r#""approved":true"#), "got {outcome}");
         }
 
         #[tokio::test]
