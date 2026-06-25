@@ -8,6 +8,16 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 ## [Unreleased] — design phase
 
 ### Implemented — 2026-06-25
+- **MCP proxy: policy-driven tool classification** (ROADMAP §7.5, step 3) — the
+  policy schema gains an optional `[tools]` table (`tool name → ActionKind`). When
+  Guardian proxies an upstream MCP server, the classifier comes from this trusted
+  map (the proxy uses `policy.tools`); a tool not listed is `Other` (restrictive
+  default). This makes the proxy practically usable — a policy can declare which
+  upstream tools are safe to treat as e.g. `FileRead` (green fast-path) — while the
+  trusted source of classification stays the policy, never the tool name. The
+  built-in MCP modes keep their fixed `builtin_classifier()`. Verified live (a
+  proxy with `[tools] read_file = "FileRead"` forwards read_file, blocks run_shell)
+  and a schema parse test. See `docs/policy-schema.md` §2.1.
 - **MCP proxy: generic stdio upstream client** (ROADMAP §7.5, step 2) —
   `guardian_mcp_gateway::upstream::McpStdioUpstream` spawns a real MCP server as a
   child process, performs the handshake, discovers its tools (`tools/list`), and

@@ -300,6 +300,26 @@ decision = "allow"
     }
 
     #[test]
+    fn tools_classification_map_parses() {
+        let policy = r#"
+version = 1
+role = "t"
+[defaults]
+decision = "ask"
+[tools]
+read_file = "FileRead"
+danger = "Exec"
+"#;
+        let p = CompiledPolicy::from_toml_str(policy).unwrap();
+        assert_eq!(
+            p.policy().tools.get("read_file"),
+            Some(&ActionKind::FileRead)
+        );
+        assert_eq!(p.policy().tools.get("danger"), Some(&ActionKind::Exec));
+        assert_eq!(p.policy().tools.get("missing"), None);
+    }
+
+    #[test]
     fn shipped_coding_agent_policy_behaves() {
         // The coding-agent pack must compile and uphold its key decisions.
         let toml = include_str!("../../../policies/default/coding-agent.toml");
