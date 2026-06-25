@@ -7,6 +7,32 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 
 ## [Unreleased] — design phase
 
+### Implemented — 2026-06-25
+- **Usable end to end with Claude Code.** A `coding-agent` policy pack
+  (`policies/default/coding-agent.toml`) tuned for an autonomous coding agent
+  (reads silent; writes/shell `ask`; destructive shell — `rm -rf /`, pipe-to-shell,
+  fork bomb, `mkfs`, `dd … of=/dev/` — plus data exfiltration and credential
+  access `deny`; benign `rm -rf ./build` falls through to `ask`). The daemon now
+  loads `GUARDIAN_POLICY` (env, consistent with `GUARDIAN_SOCK`) and **refuses to
+  start** on an unreadable/invalid policy rather than fall back silently. A ready
+  `examples/claude-code/` (settings + README) wires the `PreToolUse` hook to this
+  policy. Covered by a policy regression test (compiles + read→allow,
+  shell→ask, `rm -rf /`→deny+critical) and verified by a CLI battery.
+- **Claude Code `PreToolUse` hook adapter** (`guardian hook`) —
+  [`crates/guardian-cli`](../crates/guardian-cli),
+  [arch doc](architecture/guardian-cli.md). Reads a Claude Code `PreToolUse`
+  payload on stdin and prints the `hookSpecificOutput` permission decision
+  (`allow` / `ask` / `deny`), so Guardian mediates Claude Code's **native** tools
+  (Bash, Edit, Write, Read, WebFetch, …) — not only the tools it exposes over MCP.
+  It maps each native tool to a Guardian `Action` (Read/Glob/Grep → `FileRead`,
+  Write/Edit → `FileWrite`, Bash → `Exec` with the command in `args.cmd`,
+  WebFetch → `HttpRequest` with the host lifted from the URL) and asks the
+  deterministic policy. Unrecognized/MCP/internal tools carry no `kind` hint and
+  hit the restrictive default. Always exits 0 with a decision and **never fails
+  open**: a parse error or an unreadable policy degrades to `ask` (human decides),
+  never a silent `allow`. Covered by golden tests (allow/ask/deny, the mapping,
+  URL-host parsing) and fail-safe tests (malformed input → `ask`).
+
 ### Implemented — 2026-06-24
 - **Workspace & CI scaffold** (ROADMAP Phase 0). Cargo workspace
   (`resolver = "2"`, shared `[workspace.dependencies]`), pinned
@@ -104,6 +130,17 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
   without Guardian) on the AgentDojo prompt-injection benchmark. Python; runs with
   an API or local OpenAI-compatible model. Not run in CI (needs the AgentDojo
   package + a model); the integration logic is syntax-checked.
+- **AgentDojo defense, token-efficient blocking** (`evaluation/agentdojo/`) — on a
+  fully-denied round `GuardianDefense` now returns the policy *reason* as a `tool`
+  result (a well-formed answer to the call, so the `ToolsExecutor` executes
+  nothing and the denied action never runs) instead of silently dropping the call.
+  The agent gets explicit feedback and may try a *compliant* alternative for up to
+  `--max-retries` (default 3) blocks per episode, after which the feedback becomes
+  a hard stop; `run_eval.py` also caps the tool loop (`--max-iters`, default 10).
+  This eliminates the retry loop that ballooned denied episodes (≈18-21 → 7-11
+  messages) and wasted the model's tokens — the policy still decides every attempt
+  (the reason explains the constraint, never a bypass), so the security guarantee
+  is unchanged. Logic covered by an offline test of the feedback + retry budget.
 - **Terminal cockpit `guardian ui`** (ROADMAP Task 6.6, primary UI) — a ratatui
   TUI (no emoji, ASCII-styled, keyboard + mouse) that polls the daemon's pending
   queue and relays allow/deny over the socket: a traffic-light list with ASCII

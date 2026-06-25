@@ -1,0 +1,19 @@
+{
+  "//": "Claude Code settings to put Guardian in front of its native tools.",
+  "//1": "Replace /ABS/PATH with the absolute path to this repository, then copy",
+  "//2": "this into ~/.claude/settings.json or a project .claude/settings.json.",
+  "//3": "Build first: cargo build -p guardian-cli.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/ABS/PATH/project_sentinel/target/debug/guardian hook --policy /ABS/PATH/project_sentinel/policies/default/coding-agent.toml"
+          }
+        ]
+      }
+    ]
+  }
+}
