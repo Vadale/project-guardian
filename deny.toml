@@ -2,6 +2,13 @@
 [advisories]
 version = 2
 yanked = "deny"
+# Scoped, documented advisory exceptions (reviewed — not blanket-ignored).
+ignore = [
+    # paste: unmaintained (RUSTSEC-2024-0436). Pulled in transitively (ratatui /
+    # cel-interpreter), a compile-time-only proc-macro with no runtime code and no
+    # known vulnerability. Accepted until the upstreams migrate off it.
+    "RUSTSEC-2024-0436",
+]
 
 [licenses]
 version = 2
