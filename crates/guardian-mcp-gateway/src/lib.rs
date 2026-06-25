@@ -594,6 +594,184 @@ decision = "deny"
     }
 }
 
+/// A generic **upstream MCP client** over stdio: spawns an MCP server process,
+/// performs the handshake, discovers its tools, and forwards `tools/call`s. This
+/// turns the gateway into a real MCP **proxy** — it can front any stdio MCP server
+/// (ROADMAP §7.5), not only the built-in tools.
+pub mod upstream {
+    use std::process::Stdio;
+    use std::sync::atomic::{AtomicI64, Ordering};
+
+    use serde_json::{json, Value};
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
+    use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+    use tokio::sync::Mutex;
+
+    use crate::mcp::ToolSpec;
+    use crate::{ToolCall, Upstream};
+
+    /// An MCP server reached over a child process's stdio. Requests are serialized
+    /// (one in flight at a time) for simplicity and correctness.
+    pub struct McpStdioUpstream {
+        conn: Mutex<Conn>,
+        tools: Vec<ToolSpec>,
+        id_counter: AtomicI64,
+    }
+
+    struct Conn {
+        // Kept alive (and killed on drop) for the lifetime of the proxy.
+        _child: Child,
+        stdin: ChildStdin,
+        stdout: Lines<BufReader<ChildStdout>>,
+    }
+
+    impl McpStdioUpstream {
+        /// Spawn `program args...`, handshake, and discover the upstream's tools.
+        pub async fn spawn(program: &str, args: &[String]) -> Result<Self, String> {
+            let mut child = Command::new(program)
+                .args(args)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit())
+                .kill_on_drop(true)
+                .spawn()
+                .map_err(|e| format!("failed to spawn upstream `{program}`: {e}"))?;
+            let stdin = child.stdin.take().ok_or("upstream has no stdin")?;
+            let stdout = child.stdout.take().ok_or("upstream has no stdout")?;
+            let conn = Conn {
+                _child: child,
+                stdin,
+                stdout: BufReader::new(stdout).lines(),
+            };
+            let mut up = Self {
+                conn: Mutex::new(conn),
+                tools: Vec::new(),
+                id_counter: AtomicI64::new(1),
+            };
+            up.request(
+                "initialize",
+                json!({
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": { "name": "guardian", "version": env!("CARGO_PKG_VERSION") },
+                }),
+            )
+            .await?;
+            up.notify("notifications/initialized").await?;
+            let listed = up.request("tools/list", json!({})).await?;
+            up.tools = parse_tools(&listed);
+            Ok(up)
+        }
+
+        /// The tools discovered upstream (to re-advertise downstream).
+        pub fn tools(&self) -> Vec<ToolSpec> {
+            self.tools.clone()
+        }
+
+        async fn request(&self, method: &str, params: Value) -> Result<Value, String> {
+            let id = self.id_counter.fetch_add(1, Ordering::Relaxed);
+            let line = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params })
+                .to_string();
+            let mut conn = self.conn.lock().await;
+            write_line(&mut conn.stdin, &line).await?;
+            // Read until the response with our id (skipping notifications / other ids).
+            loop {
+                let line = conn
+                    .stdout
+                    .next_line()
+                    .await
+                    .map_err(|e| e.to_string())?
+                    .ok_or("upstream closed the connection")?;
+                let Ok(v) = serde_json::from_str::<Value>(&line) else {
+                    continue; // ignore non-JSON noise on stdout
+                };
+                if v.get("id").and_then(Value::as_i64) != Some(id) {
+                    continue;
+                }
+                if let Some(err) = v.get("error") {
+                    let msg = err
+                        .get("message")
+                        .and_then(Value::as_str)
+                        .unwrap_or("upstream error");
+                    return Err(msg.to_string());
+                }
+                return Ok(v.get("result").cloned().unwrap_or(Value::Null));
+            }
+        }
+
+        async fn notify(&self, method: &str) -> Result<(), String> {
+            let line = json!({ "jsonrpc": "2.0", "method": method }).to_string();
+            let mut conn = self.conn.lock().await;
+            write_line(&mut conn.stdin, &line).await
+        }
+    }
+
+    async fn write_line(stdin: &mut ChildStdin, line: &str) -> Result<(), String> {
+        stdin
+            .write_all(line.as_bytes())
+            .await
+            .map_err(|e| e.to_string())?;
+        stdin.write_all(b"\n").await.map_err(|e| e.to_string())?;
+        stdin.flush().await.map_err(|e| e.to_string())
+    }
+
+    /// Parse a `tools/list` result into `ToolSpec`s (best-effort; skips malformed).
+    pub fn parse_tools(result: &Value) -> Vec<ToolSpec> {
+        result
+            .get("tools")
+            .and_then(Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|t| {
+                        Some(ToolSpec {
+                            name: t.get("name")?.as_str()?.to_string(),
+                            description: t
+                                .get("description")
+                                .and_then(Value::as_str)
+                                .unwrap_or("")
+                                .to_string(),
+                            input_schema: t
+                                .get("inputSchema")
+                                .cloned()
+                                .unwrap_or_else(|| json!({ "type": "object" })),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[async_trait::async_trait]
+    impl Upstream for McpStdioUpstream {
+        async fn forward(&self, call: &ToolCall) -> Result<Value, String> {
+            self.request(
+                "tools/call",
+                json!({ "name": call.tool, "arguments": call.args }),
+            )
+            .await
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn parse_tools_reads_names_and_skips_malformed() {
+            let listed = json!({
+                "tools": [
+                    { "name": "read_file", "description": "Read", "inputSchema": { "type": "object" } },
+                    { "description": "no name -> skipped" },
+                    { "name": "run_shell" }
+                ]
+            });
+            let tools = parse_tools(&listed);
+            let names: Vec<_> = tools.iter().map(|t| t.name.as_str()).collect();
+            assert_eq!(names, vec!["read_file", "run_shell"]);
+        }
+    }
+}
+
 /// Compile-time guarantee that the gateway can be shared across async tasks
 /// (e.g. behind an `Arc` in the daemon's IPC server).
 const _: fn() = || {
