@@ -552,10 +552,21 @@ The MVP cuts corners that a real product cannot. These make the existing core
       startup — refusing to start on a broken/forked chain (fail closed).
       **Remaining:** the feature-gated ed25519 head signature, and a proper per-OS
       state dir (XDG / `Application Support` / `%APPDATA%`) once config (§9b.2) lands.
-- [ ] 9b.2 **Configuration system + first-run defaults (README §5.10).** A real
-      config file/dir for: policy path, `trusted_hosts`, approval timeout, socket
-      path, log location, Checker backend. Replace the ad-hoc `GUARDIAN_*` env vars
-      (keep them as overrides). Safe, restrictive defaults on first run.
+- [~] 9b.2 **Configuration system + first-run defaults (README §5.10).** **Done:**
+      a typed `Config` (`guardian-daemon::config`) loaded from `GUARDIAN_CONFIG`
+      (default `~/.guardian/config.toml`) with fields for policy path,
+      `trusted_hosts`, approval timeout, socket path, and audit-log location;
+      per-value precedence built-in default < config file < `GUARDIAN_*` env var
+      (kept as overrides). First run writes a commented default config; strict
+      parsing (`deny_unknown_fields`) fails closed on a malformed config. `main`
+      now reads everything via `Config` instead of scattered env reads.
+      **Remaining:** the Checker-backend field (pending §9b.4), a CLI-flag
+      precedence layer, writing the default policy pack on first run, a proper
+      per-OS config/state dir (XDG / `Application Support` / `%APPDATA%`), and —
+      flagged by the security audit — routing config `trusted_hosts` through the
+      critical-category opt-in (today it can exempt a host from host-gated critical
+      deny rules; mitigated for now by owner-only file perms + a startup log of the
+      effective value).
 - [ ] 9b.3 **Cross-platform IPC.** Windows named pipe alongside the Unix socket
       (via the `interprocess` crate) so the daemon/UI run on Windows too.
 - [ ] 9b.4 **Real Checker backends.** Ship `LocalChecker` (local model endpoint)

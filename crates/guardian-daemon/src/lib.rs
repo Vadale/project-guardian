@@ -11,6 +11,9 @@
 
 #![forbid(unsafe_code)]
 
+pub mod config;
+pub use config::{Config, ConfigError};
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
