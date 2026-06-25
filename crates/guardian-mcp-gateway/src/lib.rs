@@ -599,6 +599,7 @@ decision = "deny"
 /// turns the gateway into a real MCP **proxy** — it can front any stdio MCP server
 /// (ROADMAP §7.5), not only the built-in tools.
 pub mod upstream {
+    use std::collections::HashMap;
     use std::process::Stdio;
     use std::sync::atomic::{AtomicI64, Ordering};
 
@@ -609,6 +610,35 @@ pub mod upstream {
 
     use crate::mcp::ToolSpec;
     use crate::{ToolCall, Upstream};
+
+    /// Namespace separator for multi-server aggregation (matches the MCP
+    /// convention, e.g. `server__tool`).
+    const SEP: &str = "__";
+
+    /// `label__tool` (or just `tool` for the unlabeled single-server case).
+    pub fn namespaced_name(label: &str, tool: &str) -> String {
+        if label.is_empty() {
+            tool.to_string()
+        } else {
+            format!("{label}{SEP}{tool}")
+        }
+    }
+
+    /// Resolve a (possibly namespaced) tool name to `(label, real_tool)` given
+    /// which labels exist. A namespaced name routes to its server; otherwise it
+    /// falls back to the unlabeled server (`""`) if present.
+    fn route(name: &str, known: impl Fn(&str) -> bool) -> Option<(&str, &str)> {
+        if let Some((label, tool)) = name.split_once(SEP) {
+            if known(label) {
+                return Some((label, tool));
+            }
+        }
+        if known("") {
+            Some(("", name))
+        } else {
+            None
+        }
+    }
 
     /// An MCP server reached over a child process's stdio. Requests are serialized
     /// (one in flight at a time) for simplicity and correctness.
@@ -752,6 +782,64 @@ pub mod upstream {
         }
     }
 
+    /// Several upstream MCP servers behind one proxy. Tools are aggregated and
+    /// namespaced (`label__tool`); a `tools/call` is routed to the owning server
+    /// with the namespace stripped. One server may use the empty label (no prefix).
+    #[derive(Default)]
+    pub struct MultiUpstream {
+        servers: HashMap<String, McpStdioUpstream>,
+    }
+
+    impl MultiUpstream {
+        pub fn new() -> Self {
+            Self::default()
+        }
+
+        /// Add a server under `label`. Returns `false` if the label is taken.
+        pub fn add(&mut self, label: String, server: McpStdioUpstream) -> bool {
+            if self.servers.contains_key(&label) {
+                return false;
+            }
+            self.servers.insert(label, server);
+            true
+        }
+
+        /// The aggregated, namespaced tool list to advertise downstream.
+        pub fn tools(&self) -> Vec<ToolSpec> {
+            let mut out = Vec::new();
+            for (label, server) in &self.servers {
+                for tool in server.tools() {
+                    out.push(ToolSpec {
+                        name: namespaced_name(label, &tool.name),
+                        description: tool.description,
+                        input_schema: tool.input_schema,
+                    });
+                }
+            }
+            out
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Upstream for MultiUpstream {
+        async fn forward(&self, call: &ToolCall) -> Result<Value, String> {
+            let (label, tool) = route(&call.tool, |l| self.servers.contains_key(l))
+                .ok_or_else(|| format!("no upstream server routes tool '{}'", call.tool))?;
+            let server = self
+                .servers
+                .get(label)
+                .ok_or_else(|| format!("no upstream server '{label}'"))?;
+            server
+                .forward(&ToolCall {
+                    tool: tool.to_string(),
+                    args: call.args.clone(),
+                    kind: None,
+                    capability: None,
+                })
+                .await
+        }
+    }
+
     #[cfg(test)]
     mod tests {
         use super::*;
@@ -768,6 +856,28 @@ pub mod upstream {
             let tools = parse_tools(&listed);
             let names: Vec<_> = tools.iter().map(|t| t.name.as_str()).collect();
             assert_eq!(names, vec!["read_file", "run_shell"]);
+        }
+
+        #[test]
+        fn namespacing_roundtrips() {
+            assert_eq!(namespaced_name("files", "read"), "files__read");
+            assert_eq!(namespaced_name("", "read"), "read"); // unlabeled: no prefix
+        }
+
+        #[test]
+        fn route_resolves_namespace_and_falls_back() {
+            let known = |l: &str| matches!(l, "a" | "b");
+            assert_eq!(route("a__read_file", known), Some(("a", "read_file")));
+            // Unknown label and no unlabeled server -> unroutable.
+            assert_eq!(route("z__x", known), None);
+
+            let with_unlabeled = |l: &str| matches!(l, "" | "a");
+            // A bare name falls back to the unlabeled server.
+            assert_eq!(route("read_file", with_unlabeled), Some(("", "read_file")));
+            // A "__"-containing name whose label is unknown also falls back, intact.
+            assert_eq!(route("foo__bar", with_unlabeled), Some(("", "foo__bar")));
+            // A known namespace still routes (stripped).
+            assert_eq!(route("a__x", with_unlabeled), Some(("a", "x")));
         }
     }
 }

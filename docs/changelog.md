@@ -8,6 +8,16 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 ## [Unreleased] — design phase
 
 ### Implemented — 2026-06-25
+- **MCP proxy: multi-server aggregation + namespacing** (ROADMAP §7.5, step 4) —
+  `upstream::MultiUpstream` fronts several upstream MCP servers behind one
+  Guardian. `guardian mcp --upstream` is now repeatable (`[label=]command args`);
+  tools are aggregated and **namespaced** `label__tool`, and a `tools/call` is
+  routed to the owning server with the namespace stripped. A single unlabeled
+  upstream keeps raw tool names (back-compatible). The policy `[tools]` map keys
+  on the namespaced names, so classification stays per-server and trusted.
+  Verified live (one Guardian fronting two labeled Guardians: aggregated/namespaced
+  `tools/list`, `a__read_file` allowed and routed to server `a`, `b__read_file`
+  blocked) and unit tests for the namespacing/route helpers.
 - **MCP proxy: policy-driven tool classification** (ROADMAP §7.5, step 3) — the
   policy schema gains an optional `[tools]` table (`tool name → ActionKind`). When
   Guardian proxies an upstream MCP server, the classifier comes from this trusted

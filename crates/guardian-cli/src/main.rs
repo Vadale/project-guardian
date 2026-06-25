@@ -43,10 +43,12 @@ enum Command {
         /// Path to a running daemon's control socket to mediate through.
         #[arg(long)]
         daemon: Option<PathBuf>,
-        /// Proxy an upstream MCP server: the full stdio command that launches it
-        /// (e.g. --upstream "/path/to/server --flag"). Its tools are mediated.
+        /// Proxy upstream MCP server(s); repeatable. Each is `[label=]command args`
+        /// (e.g. --upstream "files=/path/to/server --flag"). Tools are namespaced
+        /// `label__tool` when labeled or when several are given; a single unlabeled
+        /// upstream keeps the raw tool names.
         #[arg(long)]
-        upstream: Option<String>,
+        upstream: Vec<String>,
         /// Policy file for the local gateway (proxy / default modes; not --daemon).
         #[arg(long)]
         policy: Option<PathBuf>,
@@ -465,30 +467,45 @@ fn tool_spec(name: &str, description: &str) -> ToolSpec {
 /// daemon; otherwise a self-contained local gateway over the built-in tools.
 async fn run_mcp(
     daemon: Option<PathBuf>,
-    upstream: Option<String>,
+    upstream: Vec<String>,
     policy: Option<PathBuf>,
 ) -> anyhow::Result<()> {
-    // Proxy mode: front a real upstream MCP server. Its tools are UNTRUSTED, so the
-    // classifier comes only from the policy's `[tools]` map — a tool the policy does
-    // not classify is `Other` (restrictive default), never inferred from its name.
-    if let Some(command) = upstream {
-        let mut parts = command.split_whitespace();
-        let program = parts
-            .next()
-            .ok_or_else(|| anyhow::anyhow!("--upstream command is empty"))?;
-        let args: Vec<String> = parts.map(String::from).collect();
+    // Proxy mode: front one or more real upstream MCP servers. Their tools are
+    // UNTRUSTED, so the classifier comes only from the policy's `[tools]` map — a
+    // tool the policy does not classify is `Other` (restrictive default), never
+    // inferred from its name. Tools are namespaced `label__tool` (a single
+    // unlabeled upstream keeps raw names).
+    if !upstream.is_empty() {
+        let single = upstream.len() == 1;
+        let mut multi = guardian_mcp_gateway::upstream::MultiUpstream::new();
+        for spec in &upstream {
+            let (label_opt, program, args) = parse_upstream(spec);
+            if program.is_empty() {
+                return Err(anyhow::anyhow!("--upstream command is empty"));
+            }
+            let label = match label_opt {
+                Some(l) => l,
+                None if single => String::new(),
+                None => derive_label(&program),
+            };
+            let server = guardian_mcp_gateway::upstream::McpStdioUpstream::spawn(&program, &args)
+                .await
+                .map_err(|e| anyhow::anyhow!("upstream '{program}': {e}"))?;
+            if !multi.add(label.clone(), server) {
+                return Err(anyhow::anyhow!(
+                    "duplicate upstream label '{label}' — give each --upstream a unique label=..."
+                ));
+            }
+        }
         let compiled = load_policy(&policy)?;
         let classifier = compiled.policy().tools.clone();
-        let up = guardian_mcp_gateway::upstream::McpStdioUpstream::spawn(program, &args)
-            .await
-            .map_err(|e| anyhow::anyhow!("upstream MCP server: {e}"))?;
-        let tools = up.tools();
+        let tools = multi.tools();
         let gateway = Gateway::new(
             "guardian-mcp-proxy",
             compiled,
             Box::new(StubChecker),
             Box::new(DenyAsksApprover),
-            Box::new(up),
+            Box::new(multi),
             AuditLog::open_in_memory()?,
             eval_env(),
         );
@@ -532,6 +549,34 @@ async fn run_mcp(
         .serve_stdio()
         .await?;
     Ok(())
+}
+
+/// Parse one `--upstream` spec into `(label, program, args)`. A leading
+/// `label=` is recognized only when `label` is a clean identifier (no whitespace
+/// or `/`), so a command with `=` in its args (and no label) is left intact.
+fn parse_upstream(spec: &str) -> (Option<String>, String, Vec<String>) {
+    let spec = spec.trim();
+    let (label, cmd) = match spec.split_once('=') {
+        Some((l, c)) if !l.is_empty() && !l.contains(char::is_whitespace) && !l.contains('/') => {
+            (Some(l.to_string()), c.trim())
+        }
+        _ => (None, spec),
+    };
+    let mut parts = cmd.split_whitespace();
+    let program = parts.next().unwrap_or("").to_string();
+    (label, program, parts.map(String::from).collect())
+}
+
+/// Derive a namespace label from a program path: its basename without extension.
+fn derive_label(program: &str) -> String {
+    program
+        .rsplit('/')
+        .next()
+        .unwrap_or(program)
+        .split('.')
+        .next()
+        .unwrap_or(program)
+        .to_string()
 }
 
 /// Trusted classification for Guardian's own built-in MCP tools.
