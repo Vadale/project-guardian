@@ -11,6 +11,8 @@
 
 #![forbid(unsafe_code)]
 
+use std::time::Duration;
+
 use guardian_core::{Action, ActionKind, Capability};
 use serde::{Deserialize, Serialize};
 
@@ -48,6 +50,70 @@ impl Checker for StubChecker {
             risk: base_risk(action),
             rationale: "Heuristic offline checker (no model).".to_string(),
         }
+    }
+}
+
+/// A model-backed checker over HTTP. POSTs the action (JSON) to `endpoint` and
+/// expects an [`Explanation`] JSON back (`{plain_text, risk, rationale}`). Suited
+/// to a **local** model endpoint (e.g. `http://localhost:11434/...`); HTTPS needs
+/// a TLS build feature (omitted to keep the dependency/license surface small).
+///
+/// Advisory only: on **any** error (unreachable, non-2xx, bad JSON) it degrades to
+/// a conservative offline fallback — it never errors to the caller, and so never
+/// blocks or unblocks an action.
+pub struct HttpChecker {
+    client: reqwest::Client,
+    endpoint: String,
+}
+
+impl HttpChecker {
+    pub fn new(endpoint: impl Into<String>) -> Self {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+        Self {
+            client,
+            endpoint: endpoint.into(),
+        }
+    }
+
+    async fn try_explain(&self, action: &Action) -> Result<Explanation, ()> {
+        // Cap the response body: a hostile/buggy endpoint must not OOM the daemon.
+        // An explanation is small; a few hundred KB is generous.
+        const MAX_BODY: usize = 256 * 1024;
+        let mut resp = self
+            .client
+            .post(&self.endpoint)
+            .json(action)
+            .send()
+            .await
+            .and_then(|r| r.error_for_status())
+            .map_err(|_| ())?;
+        let mut body = Vec::new();
+        while let Some(chunk) = resp.chunk().await.map_err(|_| ())? {
+            if body.len() + chunk.len() > MAX_BODY {
+                return Err(()); // oversize → conservative fallback
+            }
+            body.extend_from_slice(&chunk);
+        }
+        let mut explanation: Explanation = serde_json::from_slice(&body).map_err(|_| ())?;
+        explanation.risk = explanation.risk.min(100); // advisory scale is 0..=100
+        Ok(explanation)
+    }
+}
+
+#[async_trait::async_trait]
+impl Checker for HttpChecker {
+    async fn explain(&self, action: &Action) -> Explanation {
+        self.try_explain(action)
+            .await
+            .unwrap_or_else(|_| Explanation {
+                plain_text: describe(action),
+                risk: base_risk(action).max(60),
+                rationale: "Checker endpoint unavailable; conservative offline estimate."
+                    .to_string(),
+            })
     }
 }
 
@@ -140,6 +206,37 @@ mod tests {
         // The daemon will hold a `Box<dyn Checker>`; confirm object safety.
         let c: Box<dyn Checker> = Box::new(StubChecker);
         let e = c.explain(&action(ActionKind::Exec, None)).await;
+        assert!(e.plain_text.contains("run a command"));
+    }
+
+    #[tokio::test]
+    async fn http_checker_uses_the_endpoint_response_and_clamps_risk() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "plain_text": "model says: pays an invoice",
+                "risk": 200,                 // out of the 0..=100 scale → clamped
+                "rationale": "model"
+            })))
+            .mount(&server)
+            .await;
+        let c = HttpChecker::new(server.uri());
+        let e = c
+            .explain(&action(ActionKind::Payment, Some(Capability::Payment)))
+            .await;
+        assert_eq!(e.plain_text, "model says: pays an invoice");
+        assert_eq!(e.risk, 100); // clamped
+    }
+
+    #[tokio::test]
+    async fn http_checker_falls_back_when_unreachable() {
+        // Nothing listening → conservative fallback, never an error (advisory only).
+        let c = HttpChecker::new("http://127.0.0.1:1/never");
+        let e = c.explain(&action(ActionKind::Exec, None)).await;
+        assert!(e.risk >= 60, "fallback should be conservative");
+        assert!(e.rationale.contains("unavailable"));
         assert!(e.plain_text.contains("run a command"));
     }
 }

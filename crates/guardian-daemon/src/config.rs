@@ -34,6 +34,8 @@ pub struct Config {
     pub audit: Option<PathBuf>,
     /// Seconds before a pending approval fails closed. Default: 120.
     pub approval_timeout_secs: Option<u64>,
+    /// Advisory Checker model endpoint (HTTP). Default: none → offline StubChecker.
+    pub checker_endpoint: Option<String>,
     /// Hosts treated as trusted by the policy. Default: none.
     #[serde(default)]
     pub trusted_hosts: Vec<String>,
@@ -82,6 +84,8 @@ const DEFAULT_CONFIG_TEMPLATE: &str = r#"# Project Guardian — daemon config.
 # policy = "/absolute/path/to/policy.toml"   # omitted -> built-in default pack
 # audit  = "~/.guardian/audit.db"
 # approval_timeout_secs = 120
+# checker_endpoint = "http://localhost:11434/explain"   # advisory only; omitted -> offline.
+#   The full action (incl. args) is POSTed there — use a trusted, local endpoint.
 # trusted_hosts = ["api.example.com"]
 "#;
 
@@ -152,6 +156,15 @@ impl Config {
             .filter(|&n| n > 0)
             .unwrap_or(DEFAULT_TIMEOUT_SECS);
         Duration::from_secs(secs)
+    }
+
+    /// Resolved advisory Checker endpoint: `GUARDIAN_CHECKER` > file > none. When
+    /// none, the daemon uses the offline `StubChecker` (privacy default).
+    pub fn checker_endpoint(&self) -> Option<String> {
+        match std::env::var("GUARDIAN_CHECKER") {
+            Ok(v) if !v.is_empty() => Some(v),
+            _ => self.checker_endpoint.clone(),
+        }
     }
 }
 

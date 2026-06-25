@@ -25,6 +25,10 @@ toml = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# HTTP client for the advisory Checker. http-only (no TLS) to avoid the ring/openssl
+# license surface; a local model endpoint (e.g. http://localhost:11434) is http.
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+wiremock = "0.6"
 
 # Internal crates (path deps), referenced by dependents via `{ workspace = true }`.
 guardian-core = { path = "crates/guardian-core" }
