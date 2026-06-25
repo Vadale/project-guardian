@@ -26,10 +26,12 @@ front-end over the other crates — no policy logic of its own.
   Always exits 0 with a decision and **never fails open** — a parse error or an
   unreadable policy degrades to `ask`, never a silent `allow`. See
   [testing-with-claude-code.md](../testing-with-claude-code.md) for wiring it up.
-- **`mcp [--daemon <socket>]`** — runs Guardian as an MCP server over stdio. With
-  `--daemon`, bridges tool calls to a running daemon (so `ask` reaches the cockpit
-  via `DaemonRouter`); without it, a self-contained gateway whose `ask` decisions
-  fail closed (no UI attached).
+- **`mcp [--daemon <socket>] [--upstream "<cmd>"] [--policy <path>]`** — runs
+  Guardian as an MCP server over stdio. With `--upstream`, **proxies** a real MCP
+  server (spawns it, re-advertises its tools, mediates every call; untrusted tools
+  default to `ask`/`deny`). With `--daemon`, bridges to a running daemon so `ask`
+  reaches the cockpit (`DaemonRouter`). With neither, a self-contained gateway over
+  the built-in tools whose `ask` decisions fail closed (no UI attached).
 - **`ui [--daemon <socket>] [--demo]`** — the terminal cockpit (see below).
 
 ## Terminal cockpit (`src/tui.rs`)

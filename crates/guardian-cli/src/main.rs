@@ -38,10 +38,18 @@ enum Command {
     PolicyValidate { path: PathBuf },
     /// Run Guardian as an MCP server over stdio (newline-delimited JSON-RPC).
     /// With --daemon, mediate through a running daemon so asks reach the UI.
+    /// With --upstream, act as a proxy in front of a real upstream MCP server.
     Mcp {
         /// Path to a running daemon's control socket to mediate through.
         #[arg(long)]
         daemon: Option<PathBuf>,
+        /// Proxy an upstream MCP server: the full stdio command that launches it
+        /// (e.g. --upstream "/path/to/server --flag"). Its tools are mediated.
+        #[arg(long)]
+        upstream: Option<String>,
+        /// Policy file for the local gateway (proxy / default modes; not --daemon).
+        #[arg(long)]
+        policy: Option<PathBuf>,
     },
     /// Open the terminal cockpit to review and approve pending actions.
     Ui {
@@ -74,7 +82,11 @@ async fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
         Command::Demo => run_demo().await,
         Command::PolicyValidate { path } => validate_policy(&path),
-        Command::Mcp { daemon } => run_mcp(daemon).await,
+        Command::Mcp {
+            daemon,
+            upstream,
+            policy,
+        } => run_mcp(daemon, upstream, policy).await,
         Command::Ui { daemon, demo } => {
             let socket = daemon
                 .or_else(|| std::env::var_os("GUARDIAN_SOCK").map(PathBuf::from))
@@ -448,8 +460,42 @@ fn tool_spec(name: &str, description: &str) -> ToolSpec {
 }
 
 /// Run Guardian as an MCP server over stdio. A real MCP client (any harness) can
-/// launch this and have its `tools/call`s mediated by the policy engine.
-async fn run_mcp(daemon: Option<PathBuf>) -> anyhow::Result<()> {
+/// launch this and have its `tools/call`s mediated by the policy engine. Modes:
+/// `--upstream` proxies a real MCP server; `--daemon` mediates via a running
+/// daemon; otherwise a self-contained local gateway over the built-in tools.
+async fn run_mcp(
+    daemon: Option<PathBuf>,
+    upstream: Option<String>,
+    policy: Option<PathBuf>,
+) -> anyhow::Result<()> {
+    // Proxy mode: front a real upstream MCP server. Its tools are UNTRUSTED, so we
+    // attach no classifier — every tool is `Other` (restrictive default) until the
+    // user's policy/config trusts it explicitly (no name-inference fail-open).
+    if let Some(command) = upstream {
+        let mut parts = command.split_whitespace();
+        let program = parts
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("--upstream command is empty"))?;
+        let args: Vec<String> = parts.map(String::from).collect();
+        let up = guardian_mcp_gateway::upstream::McpStdioUpstream::spawn(program, &args)
+            .await
+            .map_err(|e| anyhow::anyhow!("upstream MCP server: {e}"))?;
+        let tools = up.tools();
+        let gateway = Gateway::new(
+            "guardian-mcp-proxy",
+            load_policy(&policy)?,
+            Box::new(StubChecker),
+            Box::new(DenyAsksApprover),
+            Box::new(up),
+            AuditLog::open_in_memory()?,
+            eval_env(),
+        );
+        McpServer::new(Box::new(gateway), tools)
+            .serve_stdio()
+            .await?;
+        return Ok(());
+    }
+
     let tools = vec![
         tool_spec("read_file", "Read a file from disk"),
         tool_spec("write_file", "Create or modify a file"),
@@ -465,24 +511,30 @@ async fn run_mcp(daemon: Option<PathBuf>) -> anyhow::Result<()> {
             guardian_daemon::DaemonClient::new(socket),
         )),
         // Self-contained local gateway. With no UI attached, asks fail closed.
-        None => {
-            let env = EvalEnv {
-                user_home: std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string()),
-                trusted_hosts: vec!["api.example.com".to_string()],
-            };
-            Box::new(Gateway::new(
-                "guardian-mcp",
-                CompiledPolicy::from_toml_str(DEMO_POLICY)?,
-                Box::new(StubChecker),
-                Box::new(DenyAsksApprover),
-                Box::new(DemoUpstream),
-                AuditLog::open_in_memory()?,
-                env,
-            ))
-        }
+        None => Box::new(Gateway::new(
+            "guardian-mcp",
+            load_policy(&policy)?,
+            Box::new(StubChecker),
+            Box::new(DenyAsksApprover),
+            Box::new(DemoUpstream),
+            AuditLog::open_in_memory()?,
+            eval_env(),
+        )),
     };
 
-    McpServer::new(router, tools).serve_stdio().await?;
+    // Trusted classification for Guardian's own tools (the gateway no longer
+    // infers an allow-eligible kind from a tool name — unmapped tools are `Other`).
+    let classifier = std::collections::HashMap::from([
+        ("read_file".to_string(), ActionKind::FileRead),
+        ("write_file".to_string(), ActionKind::FileWrite),
+        ("http_request".to_string(), ActionKind::HttpRequest),
+        ("run_shell".to_string(), ActionKind::Exec),
+        ("send_email".to_string(), ActionKind::Email),
+    ]);
+    McpServer::new(router, tools)
+        .with_classifier(classifier)
+        .serve_stdio()
+        .await?;
     Ok(())
 }
 

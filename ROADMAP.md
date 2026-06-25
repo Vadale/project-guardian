@@ -10,6 +10,30 @@
 
 ---
 
+## Status snapshot (2026-06-25)
+
+CI is green (`fmt` · `clippy -D warnings` · `test` · `cargo deny`). What exists:
+
+- **Phase 0 — done.** Workspace + 9 crates, CI, ADRs (0001–0003), governance,
+  default policy pack.
+- **Phase 1 (MVP) — substantially done.** Deterministic CEL policy engine, the
+  action model, tamper-evident audit (blake3 hash-chained SQLite), advisory
+  `StubChecker`, an MCP gateway over stdio, the daemon + Unix-socket approval
+  queue (fail-closed), the CLI (`demo`/`policy-validate`/`mcp`/`ui`/`eval`/
+  `decide`/`hook`), the ratatui cockpit (TUI), and a Tauri GUI scaffold.
+  ~74 unit tests + an AgentDojo A/B harness (ASR reduction demonstrated).
+- **Phase 2 — started.** `guardian hook` (Claude Code `PreToolUse`, **Task 7.4 —
+  done**) with a `coding-agent` policy and an `examples/claude-code/` setup. Proxy
+  and sandbox not yet built.
+
+**Honest gaps to a _product_ (not an MVP)** are now tracked as concrete tasks:
+**§7.5** (MCP proxy generalization — connect to real harnesses/servers), **§9b**
+(productionization: persisted+signed audit, config/first-run, cross-platform IPC,
+real Checker, observability), plus the remaining Phase 2/3 work. The deterministic
+security core is solid; most remaining effort is the product *around* it.
+
+---
+
 ## 0. Technology decision: language
 
 **Decision: Rust. Not C.** (Documented and reversible — override only with a
@@ -55,7 +79,7 @@ TPM and for invoking OS sandboxes — and even those have Rust bindings. We keep
 |---|---|---|
 | Async runtime | `tokio` | base for everything I/O |
 | Serialization | `serde`, `serde_json` | the action model + JSON-RPC |
-| MCP protocol | `rmcp` (official Rust MCP SDK) | young — pin a version; fallback below |
+| MCP protocol | `rmcp` (official Rust MCP SDK) | young — pin a version; fallback below. Support the current spec's **Streamable HTTP** transport (rev. 2025-06-18) *and* stdio, server- and client-side (for the proxy in §7.5) |
 | JSON-RPC (fallback / direct) | `jsonrpsee` | if `rmcp` API churns |
 | HTTP server / middleware | `axum`, `tower`, `hyper` | gateway control plane + daemon API |
 | HTTP client | `reqwest` | Checker calls, forwarding |
@@ -381,8 +405,19 @@ tamper-evident log — **with no LLM in the deny path**.
 - [ ] 7.2 CA-trust onboarding UX in the UI (install/trust the local CA safely).
 - [ ] 7.3 Sandbox wrapper: run `exec`-class tools inside `sandbox-exec`
       (macOS) / `bubblewrap` (Linux) / AppContainer (Windows) / `docker`.
-- [ ] 7.4 Native hook adapter (e.g. Claude Code `PreToolUse`/`PostToolUse`) →
-      same policy engine, deterministic deny.
+- [x] 7.4 Native hook adapter (Claude Code `PreToolUse`) → same policy engine,
+      deterministic deny. **Done** (`guardian hook` + `coding-agent` policy +
+      `examples/claude-code/`). Maps native tools → Action; unrecognized tools are
+      pinned to `Other` (never name-inferred → never auto-allow); fail-safe to `ask`.
+- [ ] 7.5 **MCP proxy generalization (connect to real harnesses & servers).**
+      Turn the stdio gateway into a true agent-agnostic MCP proxy: a generic
+      **upstream MCP client** (connect to arbitrary MCP servers, not the built-in
+      `LocalToolsUpstream`), **Streamable HTTP** transport in addition to stdio
+      (current spec, for remote agents/servers), **multi-server tool aggregation +
+      namespacing**, and — crucially — **safe classification of arbitrary tools**
+      (no name-inference fail-open; unknown tools → restrictive default; optional
+      per-server tool→capability map in the policy). Auth passthrough hook for
+      upstream servers (ties to the broker, §8.1).
 
 > 🤖 **Reusable prompt — Task 7.1 (MITM proxy)**
 > ```
@@ -408,6 +443,32 @@ tamper-evident log — **with no LLM in the deny path**.
 > only widen per policy. If no sandbox backend is available, fail closed for
 > sandboxed actions. Tests assert a denied filesystem/network access inside the
 > sandbox actually fails.
+> ```
+
+> 🤖 **Reusable prompt — Task 7.5 (MCP proxy generalization)**
+> ```
+> [Conventions preamble]
+> Generalize `guardian-mcp-gateway` from a stdio server fronting LocalToolsUpstream
+> into a production agent-agnostic MCP proxy, using rmcp (fallback jsonrpsee):
+> 1. Generic upstream MCP CLIENT: connect to one or more configured upstream MCP
+>    servers, do tools/list against each, and re-expose them to the downstream
+>    agent. Support both stdio and Streamable HTTP transports (current MCP spec),
+>    client- and server-side.
+> 2. Aggregate tools across servers with collision-safe NAMESPACING (e.g.
+>    `server__tool`); record which upstream a call routes to.
+> 3. Mediate EVERY tools/call through guardian-policy exactly as today (Allow ->
+>    forward upstream; Ask -> daemon approval; Deny -> structured MCP error). Never
+>    forward before a decision.
+> 4. SAFE CLASSIFICATION (no fail-open): do NOT infer an allow-eligible kind from a
+>    tool's name. Unknown tools map to the restrictive default. Support an optional
+>    per-server `tool -> {kind, capability}` map in the policy/config; anything
+>    unmapped is treated conservatively (ask/deny). Add adversarial tests: an
+>    upstream tool named `*read*`/`*open*` must NOT be auto-allowed.
+> 5. Auth passthrough hook for upstream servers (OAuth/headers), delegating secret
+>    handling to guardian-broker (§8.1) — the agent never sees raw credentials.
+> Integration tests with two fake upstream MCP servers (one stdio, one HTTP) prove
+> aggregation, namespacing, allow-forwards, deny-blocks, ask-waits, and no
+> name-inference auto-allow.
 > ```
 
 ---
@@ -481,15 +542,68 @@ tamper-evident log — **with no LLM in the deny path**.
 
 ---
 
+## 9b. Productionization (MVP → shippable product)
+
+The MVP cuts corners that a real product cannot. These make the existing core
+*operable and durable*, independent of the new-capability phases (2/3).
+
+- [ ] 9b.1 **Persist + sign the audit log in the daemon.** Today the daemon uses an
+      in-memory log (lost on restart). Write to a state dir (XDG / `Application
+      Support` / `%APPDATA%`); enable the feature-gated ed25519 head signature;
+      `verify()` on startup and refuse to run on a broken/forked chain (fail closed).
+- [ ] 9b.2 **Configuration system + first-run defaults (README §5.10).** A real
+      config file/dir for: policy path, `trusted_hosts`, approval timeout, socket
+      path, log location, Checker backend. Replace the ad-hoc `GUARDIAN_*` env vars
+      (keep them as overrides). Safe, restrictive defaults on first run.
+- [ ] 9b.3 **Cross-platform IPC.** Windows named pipe alongside the Unix socket
+      (via the `interprocess` crate) so the daemon/UI run on Windows too.
+- [ ] 9b.4 **Real Checker backends.** Ship `LocalChecker` (local model endpoint)
+      and an opt-in `RemoteChecker` behind config (Task 6.3), keeping `StubChecker`
+      for tests. Advisory-only — still never on the allow/deny path.
+- [ ] 9b.5 **Observability.** Wire `tracing`/`tracing-subscriber` through the
+      daemon and adapters (structured operational logs, distinct from the audit
+      log); optional metrics. A `--verbose`/log-level knob.
+- [ ] 9b.6 **Self-protection + kill switch** (README §5.8/§5.9; overlaps §9.2):
+      detect/deny an agent action that targets Guardian's own config, policy,
+      socket, or audit store; a user-driven hard stop that fails all pending to Deny.
+
+> 🤖 **Reusable prompt — Task 9b.1 (persist + sign audit)**
+> ```
+> [Conventions preamble]
+> Make guardian-daemon use a PERSISTENT, signed audit log instead of the in-memory
+> one. Open the blake3 hash-chained SQLite log at a per-OS state path (XDG data dir
+> / ~/Library/Application Support / %APPDATA%), creating it if absent. Enable the
+> ed25519 head-signature (feature-gated in guardian-audit): sign the chain head;
+> store the key via the keyring crate (never plaintext). On startup, run verify()
+> and refuse to start (fail closed, clear error) if the chain is broken, reordered,
+> truncated, or the head signature doesn't match. Tests: restart preserves and
+> re-verifies the chain; a tampered store is rejected at startup.
+> ```
+
+> 🤖 **Reusable prompt — Task 9b.2 (config + first-run)**
+> ```
+> [Conventions preamble]
+> Add a configuration layer: a typed Config (serde) loaded from a per-OS config dir
+> (XDG / Application Support / %APPDATA%) with fields for policy path, trusted_hosts,
+> approval_timeout, socket/pipe path, log path, and checker backend. Precedence:
+> built-in safe defaults < config file < GUARDIAN_* env overrides < CLI flags. On
+> first run, write a restrictive default config and the default policy pack, and
+> tell the user where they are. Validate on load; refuse invalid config (fail
+> closed). Tests for precedence and first-run materialization.
+> ```
+
+---
+
 ## 10. Milestones & rough timeline (solo, AI-assisted)
 
-| Milestone | Scope | Rough time |
+| Milestone | Scope | Status / time |
 |---|---|---|
-| **M0** Skeleton | Phase 0 | week 1 |
-| **M1** MVP | Phase 1 (§6) — the E2E demo | weeks 2–8 |
-| **M2** Contained | Phase 2 — proxy + sandbox + hook adapter | +3–5 weeks |
-| **M3** Delegated | Phase 3 — broker, learning, report, signed packs | +4–6 weeks |
-| **M4** 1.0 | Phase 4 — hardening + packaging + docs | +3–4 weeks |
+| **M0** Skeleton | Phase 0 | ✅ done |
+| **M1** MVP | Phase 1 (§6) — the E2E demo | ✅ substantially done (engine, audit, gateway, daemon, CLI, TUI, hook) |
+| **M2** Contained | Phase 2 — proxy + sandbox + hook adapter + **MCP proxy (§7.5)** | 🟡 hook done; proxy/sandbox/§7.5 pending (+3–5 wks) |
+| **M3** Delegated | Phase 3 — broker, learning, report, signed packs | pending (+4–6 wks) |
+| **Mp** Product | §9b productionization (persisted/signed audit, config, IPC, Checker, observability) | pending (+2–3 wks) |
+| **M4** 1.0 | Phase 4 — hardening + packaging + docs | pending (+3–4 wks) |
 
 Timelines assume AI-assisted implementation and tight scope discipline. M1 is the
 proof point; M4 is a shippable open-source 1.0.
@@ -504,4 +618,8 @@ proof point; M4 is a shippable open-source 1.0.
 5. Critical categories are never auto-downgraded (test-enforced).
 6. `clippy -D warnings`, `fmt`, `cargo-deny`, `nextest` all green in CI.
 7. All code, comments, and docs are in English.
+8. **Classification never fails open:** an unrecognized tool/action maps to the
+   restrictive default (`Other` → `ask`/`deny`), never to an allow-eligible kind
+   inferred from an attacker-controlled tool name. (Test-enforced — see the hook
+   and the §7.5 proxy.)
 ```
