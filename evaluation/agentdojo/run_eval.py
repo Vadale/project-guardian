@@ -47,10 +47,23 @@ def build_pipeline(args) -> AgentPipeline:
     llm = OpenAILLM(client, args.model)
     loop_elements = []
     if args.with_guardian:
-        loop_elements.append(GuardianDefense(block_decisions=tuple(args.block)))
+        loop_elements.append(
+            GuardianDefense(
+                block_decisions=tuple(args.block),
+                max_block_retries=args.max_retries,
+            )
+        )
     loop_elements += [ToolsExecutor(), llm]
+    # ToolsExecutionLoop runs *exactly* max_iters times, so a non-positive value
+    # would execute no tools at all; clamp to AgentDojo's default of 15.
+    max_iters = args.max_iters if args.max_iters > 0 else 15
     pipeline = AgentPipeline(
-        [SystemMessage(SYSTEM_MESSAGE), InitQuery(), llm, ToolsExecutionLoop(loop_elements)]
+        [
+            SystemMessage(SYSTEM_MESSAGE),
+            InitQuery(),
+            llm,
+            ToolsExecutionLoop(loop_elements, max_iters=max_iters),
+        ]
     )
     # The attack maps a model-id substring in pipeline.name to a prose name;
     # "local" -> "Local model" (the right one for an Ollama model).
@@ -76,6 +89,13 @@ def main() -> None:
     parser.add_argument("--block", nargs="+", default=["deny"])
     parser.add_argument("--user-tasks", type=int, default=2)
     parser.add_argument("--injection-tasks", type=int, default=2)
+    # Cap the tool loop: bounds wasted re-proposals when Guardian denies a call
+    # (same value for both arms -> still a fair A/B). Must be positive; a
+    # non-positive value is clamped to AgentDojo's default of 15 in build_pipeline.
+    parser.add_argument("--max-iters", type=int, default=10)
+    # Per-episode budget of blocked retries before Guardian's feedback turns into a
+    # hard stop (guardian arm only). Bounds the model's wasted tokens on denials.
+    parser.add_argument("--max-retries", type=int, default=3)
     parser.add_argument("--logdir", default="runs")
     parser.add_argument("--out", default=None)
     args = parser.parse_args()
