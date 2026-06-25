@@ -300,6 +300,34 @@ decision = "allow"
     }
 
     #[test]
+    fn shipped_coding_agent_policy_behaves() {
+        // The coding-agent pack must compile and uphold its key decisions.
+        let toml = include_str!("../../../policies/default/coding-agent.toml");
+        let p = CompiledPolicy::from_toml_str(toml).expect("coding-agent policy must compile");
+        assert_eq!(p.policy().role, "coding-agent");
+
+        // Reads are silent; a benign shell command asks.
+        let read = action(ActionKind::FileRead, "Read", json!({}), None);
+        assert_eq!(p.evaluate(&read, &env()).decision, Decision::Allow);
+        let benign = action(
+            ActionKind::Exec,
+            "Bash",
+            json!({ "cmd": "git status" }),
+            None,
+        );
+        assert!(matches!(
+            p.evaluate(&benign, &env()).decision,
+            Decision::Ask { .. }
+        ));
+
+        // A catastrophic shell command is denied, and flagged critical.
+        let nuke = action(ActionKind::Exec, "Bash", json!({ "cmd": "rm -rf /" }), None);
+        let out = p.evaluate(&nuke, &env());
+        assert!(matches!(out.decision, Decision::Deny { .. }));
+        assert!(out.critical);
+    }
+
+    #[test]
     fn count_cap_escalates_and_fails_safe() {
         let policy = r#"
 version = 1

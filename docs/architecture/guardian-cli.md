@@ -15,7 +15,17 @@ front-end over the other crates — no policy logic of its own.
 - **`decide [--policy <path>]`** — reads a tool-call JSON on stdin and prints the
   policy decision (`allow`/`ask`/`deny` + reason + critical + matched rule)
   **without executing**. The integration point for external evaluators (the
-  AgentDojo shim) and for a future Claude Code `PreToolUse` hook.
+  AgentDojo shim).
+- **`hook [--policy <path>]`** — the **Claude Code `PreToolUse` hook adapter**.
+  Reads the hook payload on stdin (`tool_name` + `tool_input`) and prints the
+  `hookSpecificOutput` permission decision (`allow`/`ask`/`deny`) so Guardian
+  mediates Claude Code's **native** tools. Maps each tool to a Guardian `Action`
+  (Read/Glob/Grep → `FileRead`, Write/Edit → `FileWrite`, Bash → `Exec` with the
+  command in `args.cmd`, WebFetch → `HttpRequest` with the host from the URL);
+  unrecognized/MCP/internal tools carry no hint and hit the restrictive default.
+  Always exits 0 with a decision and **never fails open** — a parse error or an
+  unreadable policy degrades to `ask`, never a silent `allow`. See
+  [testing-with-claude-code.md](../testing-with-claude-code.md) for wiring it up.
 - **`mcp [--daemon <socket>]`** — runs Guardian as an MCP server over stdio. With
   `--daemon`, bridges tool calls to a running daemon (so `ask` reaches the cockpit
   via `DaemonRouter`); without it, a self-contained gateway whose `ask` decisions
