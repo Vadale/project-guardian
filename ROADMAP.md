@@ -575,9 +575,22 @@ The MVP cuts corners that a real product cannot. These make the existing core
 - [ ] 9b.5 **Observability.** Wire `tracing`/`tracing-subscriber` through the
       daemon and adapters (structured operational logs, distinct from the audit
       log); optional metrics. A `--verbose`/log-level knob.
-- [ ] 9b.6 **Self-protection + kill switch** (README §5.8/§5.9; overlaps §9.2):
-      detect/deny an agent action that targets Guardian's own config, policy,
-      socket, or audit store; a user-driven hard stop that fails all pending to Deny.
+- [~] 9b.6 **Self-protection + kill switch** (README §5.8/§5.9; overlaps §9.2).
+      **Done:** the gateway applies a deterministic hard override **before** the
+      policy (recorded to the audit log): (1) a **kill switch** — while a `STOP`
+      sentinel exists, every action is denied; (2) **self-protection** — deny
+      `FileWrite`/`Delete` targeting Guardian's own files (config, policy, audit,
+      socket, `STOP`, `~/.guardian`), with paths normalized (`..`/relative can't
+      evade the prefix). Daemon `kill_switch` control command + `DaemonClient`.
+      **Remaining (flagged by the security audit):** (a) **control-channel
+      separation** — today the agent and user share one control socket, so the
+      agent could `kill_switch{engage:false}`/`respond{approve}` on it; split the
+      agent-facing channel from the user/control channel (peer-cred or a second
+      socket) so the kill switch and approvals are user-only. (b) **`Exec`
+      coverage** — a shell command can still modify Guardian's files; needs the OS
+      sandbox backstop (§7.3). (c) symlink resolution (needs canonicalization /
+      the sandbox). Until (a)+(b), the kill switch is effective on the mediated
+      file path but not yet fully agent-proof.
 
 > 🤖 **Reusable prompt — Task 9b.1 (persist + sign audit)**
 > ```

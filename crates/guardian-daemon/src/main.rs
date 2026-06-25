@@ -13,8 +13,9 @@ use std::sync::Arc;
 
 use guardian_audit::AuditLog;
 use guardian_checker::StubChecker;
+use guardian_daemon::config;
 use guardian_daemon::{serve, ApprovalQueue, Config, LocalToolsUpstream, QueueApprover};
-use guardian_mcp_gateway::Gateway;
+use guardian_mcp_gateway::{Gateway, SelfProtection};
 use guardian_policy::{CompiledPolicy, EvalEnv};
 
 /// The shipped default policy pack, embedded as a fallback.
@@ -92,15 +93,33 @@ async fn main() -> std::io::Result<()> {
     }
     let queue = Arc::new(ApprovalQueue::new(cfg.approval_timeout()));
     let approver = QueueApprover::new(queue.clone());
-    let gateway = Arc::new(Gateway::new(
-        "daemon",
-        policy,
-        Box::new(StubChecker),
-        Box::new(approver),
-        Box::new(LocalToolsUpstream),
-        open_audit(cfg.audit_path()),
-        env,
-    ));
+
+    // Self-protection: refuse to write/delete Guardian's own files, and honor the
+    // kill switch (a `STOP` sentinel next to the config denies everything).
+    let mut protected = vec![
+        config::guardian_dir(),
+        config::config_path(),
+        config::kill_switch_path(), // so the agent can't delete STOP to disengage
+        cfg.audit_path(),
+        cfg.socket_path(),
+    ];
+    if let Some(p) = cfg.policy_path() {
+        protected.push(p);
+    }
+    let self_protection = SelfProtection::new(protected, Some(config::kill_switch_path()));
+
+    let gateway = Arc::new(
+        Gateway::new(
+            "daemon",
+            policy,
+            Box::new(StubChecker),
+            Box::new(approver),
+            Box::new(LocalToolsUpstream),
+            open_audit(cfg.audit_path()),
+            env,
+        )
+        .with_self_protection(self_protection),
+    );
 
     let path = cfg.socket_path();
     println!("guardian-daemon: listening on {}", path.display());

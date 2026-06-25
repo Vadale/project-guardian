@@ -15,6 +15,7 @@
 
 #![forbid(unsafe_code)]
 
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -84,6 +85,80 @@ pub enum GatewayOutcome {
     Blocked(String),
 }
 
+/// Deterministic self-protection — hard overrides the gateway applies **before**
+/// the policy, so a misconfigured policy can't weaken them (README §5.8/§5.9):
+/// (1) a **kill switch** — while the sentinel file exists, every action is denied;
+/// (2) **self-protection** — refuse to write/delete Guardian's own files (config,
+/// policy, audit, socket, the `.guardian` dir).
+#[derive(Default)]
+pub struct SelfProtection {
+    protected_prefixes: Vec<PathBuf>,
+    kill_switch: Option<PathBuf>,
+}
+
+impl SelfProtection {
+    /// `protected_prefixes`: path prefixes that must never be modified.
+    /// `kill_switch`: a sentinel file whose presence denies everything.
+    pub fn new(protected_prefixes: Vec<PathBuf>, kill_switch: Option<PathBuf>) -> Self {
+        Self {
+            protected_prefixes,
+            kill_switch,
+        }
+    }
+
+    /// `Some(reason)` if this action must be hard-denied regardless of policy.
+    fn override_deny(&self, action: &Action) -> Option<String> {
+        if let Some(ks) = &self.kill_switch {
+            if ks.exists() {
+                return Some(
+                    "Guardian kill switch is engaged — all actions are blocked.".to_string(),
+                );
+            }
+        }
+        // Refuse writes/deletes that target Guardian's own files. Paths are
+        // normalized (absolutized + `.`/`..` resolved) so a relative or `..`-laden
+        // path can't evade the prefix check. (Symlinks still need the OS sandbox.)
+        if matches!(action.kind, ActionKind::FileWrite | ActionKind::Delete) {
+            if let Some(path) = &action.context.path {
+                let target = normalize_abs(Path::new(path));
+                if self
+                    .protected_prefixes
+                    .iter()
+                    .any(|p| target.starts_with(normalize_abs(p)))
+                {
+                    return Some(format!(
+                        "Guardian self-protection: refusing to modify its own file ({path})."
+                    ));
+                }
+            }
+        }
+        None
+    }
+}
+
+/// Absolutize (against the current dir) and lexically resolve `.`/`..`, so a
+/// relative or `..`-laden path cannot slip past a prefix check. Does not resolve
+/// symlinks — that residual is left to the OS sandbox (ROADMAP §7.3).
+fn normalize_abs(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let abs = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().unwrap_or_default().join(path)
+    };
+    let mut out = PathBuf::new();
+    for comp in abs.components() {
+        match comp {
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::CurDir => {}
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
 /// The mediation gateway: ties the policy engine, Checker, audit log, an
 /// [`Approver`], and an [`Upstream`] together.
 pub struct Gateway {
@@ -94,6 +169,7 @@ pub struct Gateway {
     upstream: Box<dyn Upstream>,
     audit: Mutex<AuditLog>,
     env: EvalEnv,
+    self_protection: SelfProtection,
     counter: AtomicU64,
 }
 
@@ -116,14 +192,38 @@ impl Gateway {
             upstream,
             audit: Mutex::new(audit),
             env,
+            self_protection: SelfProtection::default(),
             counter: AtomicU64::new(0),
         }
+    }
+
+    /// Enable self-protection + kill switch (default: none).
+    pub fn with_self_protection(mut self, self_protection: SelfProtection) -> Self {
+        self.self_protection = self_protection;
+        self
     }
 
     /// Mediate one tool call: normalize → evaluate → (for `ask` only) explain +
     /// ask the human → record → forward or block.
     pub async fn handle(&self, call: ToolCall) -> GatewayOutcome {
         let action = self.normalize(&call);
+
+        // Deterministic hard overrides, applied before (and never weakened by) the
+        // policy: kill switch and self-protection. Recorded as a deny.
+        if let Some(reason) = self.self_protection.override_deny(&action) {
+            let decision = Decision::Deny {
+                reason: reason.clone(),
+            };
+            self.record(
+                &action,
+                &decision,
+                Some("self-protection".to_string()),
+                None,
+                None,
+            );
+            return GatewayOutcome::Blocked(reason);
+        }
+
         let outcome = self.policy.evaluate(&action, &self.env);
 
         // The Checker and Approver are consulted ONLY for `ask`. Allow/deny never
@@ -1059,5 +1159,87 @@ explain = "Sends an email on your behalf."
         assert_eq!(infer_kind("mystery.thing"), ActionKind::Other);
         assert_eq!(infer_kind("bank.transfer"), ActionKind::Payment);
         assert_eq!(infer_kind("shell.exec"), ActionKind::Exec);
+    }
+
+    #[tokio::test]
+    async fn self_protection_blocks_writes_to_its_own_files() {
+        let (gw, forwarded) = gateway_with(
+            Box::new(AutoApprove),
+            Box::new(guardian_checker::StubChecker),
+        );
+        let gw = gw.with_self_protection(SelfProtection::new(
+            vec![std::path::PathBuf::from("/grd")],
+            None,
+        ));
+        let write = ToolCall {
+            tool: "write_file".to_string(),
+            args: serde_json::json!({ "path": "/grd/policy.toml" }),
+            kind: Some(ActionKind::FileWrite),
+            capability: None,
+        };
+        assert!(matches!(gw.handle(write).await, GatewayOutcome::Blocked(_)));
+        assert!(forwarded.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn kill_switch_denies_everything_then_releases() {
+        let ks = std::env::temp_dir().join(format!("guardian-ks-{}", std::process::id()));
+        std::fs::write(&ks, "").unwrap(); // engage
+        let (gw, _f) = gateway_with(
+            Box::new(AutoApprove),
+            Box::new(guardian_checker::StubChecker),
+        );
+        let gw = gw.with_self_protection(SelfProtection::new(vec![], Some(ks.clone())));
+        // Even a normally-allowed read is blocked while the switch is engaged.
+        assert!(matches!(
+            gw.handle(call("fs.read", ActionKind::FileRead)).await,
+            GatewayOutcome::Blocked(_)
+        ));
+        // Disengage → the policy applies again.
+        std::fs::remove_file(&ks).unwrap();
+        assert!(matches!(
+            gw.handle(call("fs.read", ActionKind::FileRead)).await,
+            GatewayOutcome::Allowed(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn self_protection_normalizes_paths_and_scopes_to_writes() {
+        let (gw, _f) = gateway_with(
+            Box::new(AutoApprove),
+            Box::new(guardian_checker::StubChecker),
+        );
+        let gw = gw.with_self_protection(SelfProtection::new(
+            vec![std::path::PathBuf::from("/grd")],
+            None,
+        ));
+        let write = |p: &str| ToolCall {
+            tool: "write_file".to_string(),
+            args: serde_json::json!({ "path": p }),
+            kind: Some(ActionKind::FileWrite),
+            capability: None,
+        };
+        // `..` that resolves INTO the protected dir is blocked (lexical-match bypass).
+        assert!(matches!(
+            gw.handle(write("/x/../grd/policy.toml")).await,
+            GatewayOutcome::Blocked(_)
+        ));
+        assert!(matches!(
+            gw.handle(write("/grd/sub/../config.toml")).await,
+            GatewayOutcome::Blocked(_)
+        ));
+        // A sibling prefix is NOT protected (component-wise match, not substring).
+        assert!(!matches!(
+            gw.handle(write("/grd-evil/x")).await,
+            GatewayOutcome::Blocked(_)
+        ));
+        // Self-protection guards modification, not reads.
+        let read = ToolCall {
+            tool: "read_file".to_string(),
+            args: serde_json::json!({ "path": "/grd/policy.toml" }),
+            kind: Some(ActionKind::FileRead),
+            capability: None,
+        };
+        assert!(matches!(gw.handle(read).await, GatewayOutcome::Allowed(_)));
     }
 }
