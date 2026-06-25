@@ -482,7 +482,19 @@ async fn run_mcp(daemon: Option<PathBuf>) -> anyhow::Result<()> {
         }
     };
 
-    McpServer::new(router, tools).serve_stdio().await?;
+    // Trusted classification for Guardian's own tools (the gateway no longer
+    // infers an allow-eligible kind from a tool name — unmapped tools are `Other`).
+    let classifier = std::collections::HashMap::from([
+        ("read_file".to_string(), ActionKind::FileRead),
+        ("write_file".to_string(), ActionKind::FileWrite),
+        ("http_request".to_string(), ActionKind::HttpRequest),
+        ("run_shell".to_string(), ActionKind::Exec),
+        ("send_email".to_string(), ActionKind::Email),
+    ]);
+    McpServer::new(router, tools)
+        .with_classifier(classifier)
+        .serve_stdio()
+        .await?;
     Ok(())
 }
 

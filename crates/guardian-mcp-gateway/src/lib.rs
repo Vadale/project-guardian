@@ -297,10 +297,12 @@ fn infer_capability(kind: ActionKind) -> Option<Capability> {
 /// result, `Deny` returns a JSON-RPC error, and an upstream failure returns a
 /// tool result with `isError: true`.
 pub mod mcp {
+    use std::collections::HashMap;
+
     use serde::Serialize;
     use serde_json::{json, Value};
 
-    use super::{GatewayOutcome, ToolCall, ToolRouter};
+    use super::{ActionKind, GatewayOutcome, ToolCall, ToolRouter};
 
     /// A tool advertised in `tools/list`.
     #[derive(Debug, Clone, Serialize)]
@@ -316,6 +318,10 @@ pub mod mcp {
     pub struct McpServer {
         router: Box<dyn ToolRouter>,
         tools: Vec<ToolSpec>,
+        /// Trusted tool-name → ActionKind classification. A tool NOT in this map is
+        /// classified `Other` (the restrictive default) — never inferred from its
+        /// (untrusted) name, so a proxied upstream tool cannot fail open to allow.
+        classifier: HashMap<String, ActionKind>,
         name: String,
         version: String,
     }
@@ -325,9 +331,17 @@ pub mod mcp {
             Self {
                 router,
                 tools,
+                classifier: HashMap::new(),
                 name: "guardian".to_string(),
                 version: env!("CARGO_PKG_VERSION").to_string(),
             }
+        }
+
+        /// Set the trusted tool→kind classification (the host's known-safe tools).
+        /// Tools left unmapped are evaluated as `Other` — fail safe.
+        pub fn with_classifier(mut self, classifier: HashMap<String, ActionKind>) -> Self {
+            self.classifier = classifier;
+            self
         }
 
         /// Handle one JSON-RPC message line. Returns the response line, or `None`
@@ -379,10 +393,17 @@ pub mod mcp {
                 .ok_or((-32602, "missing tool name".to_string()))?
                 .to_string();
             let args = params.get("arguments").cloned().unwrap_or(Value::Null);
+            // Classify from the trusted map; an unmapped tool is `Other` (restrictive
+            // default), never inferred from its name — upholds the no-fail-open gate.
+            let kind = self
+                .classifier
+                .get(&name)
+                .copied()
+                .unwrap_or(ActionKind::Other);
             let call = ToolCall {
                 tool: name,
                 args,
-                kind: None,
+                kind: Some(kind),
                 capability: None,
             };
             match self.router.route(call).await {
@@ -486,6 +507,10 @@ decision = "deny"
                     input_schema: json!({ "type": "object" }),
                 }],
             )
+            .with_classifier(HashMap::from([
+                ("read_file".to_string(), ActionKind::FileRead),
+                ("run_shell".to_string(), ActionKind::Exec),
+            ]))
         }
 
         #[tokio::test]
@@ -529,6 +554,20 @@ decision = "deny"
             let resp = server()
                 .handle_line(
                     r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"run_shell","arguments":{}}}"#,
+                )
+                .await
+                .unwrap();
+            assert!(resp.contains(r#""error""#), "got {resp}");
+            assert!(resp.contains("Blocked by Guardian"), "got {resp}");
+        }
+
+        #[tokio::test]
+        async fn unmapped_tool_is_not_auto_allowed() {
+            // A tool named like a reader but absent from the classifier must NOT be
+            // auto-allowed: it is classified Other → restrictive default → blocked.
+            let resp = server()
+                .handle_line(
+                    r#"{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"sneaky_read","arguments":{}}}"#,
                 )
                 .await
                 .unwrap();

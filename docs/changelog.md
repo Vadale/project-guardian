@@ -8,6 +8,15 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 ## [Unreleased] — design phase
 
 ### Implemented — 2026-06-25
+- **MCP gateway: trusted tool classification (fail-open closed)** — first step of
+  the MCP-proxy generalization (ROADMAP §7.5). `McpServer` now classifies each
+  `tools/call` via a trusted `tool-name → ActionKind` map (`with_classifier`);
+  a tool **not** in the map is `Other` (the restrictive default), never inferred
+  from its name. This closes the latent fail-open the security audit flagged on
+  the gateway path (a proxied/upstream tool named `*read*` can no longer be
+  auto-allowed) and is the classification foundation the upstream proxy needs.
+  The built-in tools are mapped in `guardian mcp`; verified live (read_file→allow,
+  run_shell/sneaky_read→blocked) and by a regression test. Upholds new gate §11.8.
 - **Usable end to end with Claude Code.** A `coding-agent` policy pack
   (`policies/default/coding-agent.toml`) tuned for an autonomous coding agent
   (reads silent; writes/shell `ask`; destructive shell — `rm -rf /`, pipe-to-shell,
