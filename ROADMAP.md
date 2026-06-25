@@ -572,9 +572,12 @@ The MVP cuts corners that a real product cannot. These make the existing core
 - [ ] 9b.4 **Real Checker backends.** Ship `LocalChecker` (local model endpoint)
       and an opt-in `RemoteChecker` behind config (Task 6.3), keeping `StubChecker`
       for tests. Advisory-only — still never on the allow/deny path.
-- [ ] 9b.5 **Observability.** Wire `tracing`/`tracing-subscriber` through the
-      daemon and adapters (structured operational logs, distinct from the audit
-      log); optional metrics. A `--verbose`/log-level knob.
+- [~] 9b.5 **Observability.** **Done:** `tracing` + `tracing-subscriber` (env-filter
+      `RUST_LOG`, default `info`) wired through the daemon — structured operational
+      logs (startup, per-call `tool`+`status`, invalid requests, failed kill-switch
+      engage), **distinct from the tamper-evident audit log**; no secrets/bodies
+      logged. **Remaining:** optional metrics, and tracing in the gateway/proxy
+      front-ends.
 - [~] 9b.6 **Self-protection + kill switch** (README §5.8/§5.9; overlaps §9.2).
       **Done:** the gateway applies a deterministic hard override **before** the
       policy (recorded to the audit log): (1) a **kill switch** — while a `STOP`

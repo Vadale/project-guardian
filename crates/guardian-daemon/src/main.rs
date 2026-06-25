@@ -27,24 +27,18 @@ const DEFAULT_POLICY: &str = include_str!("../../../policies/default/personal-as
 fn load_policy(path: Option<PathBuf>) -> CompiledPolicy {
     match path {
         Some(path) => {
-            let display = path.display().to_string();
+            let path_str = path.display().to_string();
             let src = std::fs::read_to_string(&path)
-                .unwrap_or_else(|e| panic!("cannot read policy ({display}): {e}"));
+                .unwrap_or_else(|e| panic!("cannot read policy ({path_str}): {e}"));
             let policy = CompiledPolicy::from_toml_str(&src)
-                .unwrap_or_else(|e| panic!("policy ({display}) failed to compile: {e}"));
-            println!(
-                "guardian-daemon: policy `{}` from {display}",
-                policy.policy().role
-            );
+                .unwrap_or_else(|e| panic!("policy ({path_str}) failed to compile: {e}"));
+            tracing::info!(role = %policy.policy().role, path = %path_str, "policy loaded");
             policy
         }
         None => {
             let policy =
                 CompiledPolicy::from_toml_str(DEFAULT_POLICY).expect("default policy must compile");
-            println!(
-                "guardian-daemon: policy `{}` (built-in default)",
-                policy.policy().role
-            );
+            tracing::info!(role = %policy.policy().role, "policy loaded (built-in default)");
             policy
         }
     }
@@ -66,16 +60,25 @@ fn open_audit(path: PathBuf) -> AuditLog {
             path.display()
         )
     });
-    println!(
-        "guardian-daemon: audit log {} ({} entries, intact)",
-        path.display(),
-        log.len().unwrap_or(0)
+    tracing::info!(
+        path = %path.display(),
+        entries = log.len().unwrap_or(0),
+        "audit log opened (chain intact)"
     );
     log
 }
 
+/// Initialize structured logging (`tracing`). Level via `RUST_LOG` (default
+/// `info`). This is operational logging — distinct from the tamper-evident audit.
+fn init_tracing() {
+    use tracing_subscriber::EnvFilter;
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    tracing_subscriber::fmt().with_env_filter(filter).init();
+}
+
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
+    init_tracing();
     // Fail closed on a malformed config rather than guessing.
     let cfg = Config::load().unwrap_or_else(|e| panic!("config: {e}"));
     let policy = load_policy(cfg.policy_path());
@@ -86,9 +89,9 @@ async fn main() -> std::io::Result<()> {
     // Surface trust widening: trusted_hosts exempts hosts from host-gated critical
     // rules (exfiltration/credentials), so make any configured value visible.
     if !cfg.trusted_hosts.is_empty() {
-        println!(
-            "guardian-daemon: trusted_hosts = {:?} (exempt from host-gated critical rules)",
-            cfg.trusted_hosts
+        tracing::warn!(
+            trusted_hosts = ?cfg.trusted_hosts,
+            "trusted_hosts configured — these are exempt from host-gated critical rules"
         );
     }
     let queue = Arc::new(ApprovalQueue::new(cfg.approval_timeout()));
@@ -122,7 +125,6 @@ async fn main() -> std::io::Result<()> {
     );
 
     let path = cfg.socket_path();
-    println!("guardian-daemon: listening on {}", path.display());
-    println!(r#"  protocol: newline-delimited JSON, e.g. {{"cmd":"pending"}}"#);
+    tracing::info!(socket = %path.display(), "guardian-daemon listening (newline-delimited JSON control protocol)");
     serve(&path, gateway, queue).await
 }
