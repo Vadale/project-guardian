@@ -39,14 +39,17 @@ front-end over the other crates — no policy logic of its own.
   audit log (the "black box"): prints the integrity status (`verify()` → OK/TAMPERED),
   the entry count, and a table of recent decisions. Resilient to a corrupt row
   (renders `<unreadable>`); never modifies the log.
-- **`proxy [--listen <addr>] [--policy] [--secrets] [--keychain <target>]… [--audit] [--ca-dir] [--daemon] [--print-ca-path] [--install-ca]`**
+- **`proxy [--listen <addr>] [--policy] [--secrets] [--keychain <target>]… [--caveats <file>] [--audit] [--ca-dir] [--daemon] [--print-ca-path] [--install-ca]`**
   — the user-space HTTP(S) forward proxy (Phase 2). Point the agent's
   `HTTP_PROXY`/`HTTPS_PROXY` at it; mediates web traffic with the same policy +
   token broker, generates/uses a local CA for HTTPS interception (`--print-ca-path`
   shows the cert; `--install-ca` trusts it — warns first, prints platform commands,
   and on macOS runs `security add-trusted-cert`, which the OS prompts you to
   authorize). `--daemon <socket>` routes `ask` decisions to that daemon's cockpit for
-  human approval (else `ask` fails closed). Backed by `guardian-proxy`.
+  human approval (else `ask` fails closed). `--keychain <target>` sources a host's
+  credential from the OS keychain; `--caveats <file>` attaches least-privilege caveats
+  (expiry / allowed-hosts / max-amount / fresh-approval-for-critical, §8.1). Backed by
+  `guardian-proxy`.
 - **`pack {sign,verify} <dir>`** — sign or verify a **signed community policy pack**
   (Phase 3 / §8.4): an ed25519-signed directory of policy TOML. `sign` writes
   `guardian-pack.json` (manifest + publisher key + signature; signing seed in

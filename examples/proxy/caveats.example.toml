@@ -1,0 +1,17 @@
+# Example least-privilege caveats for the network proxy (§8.1).
+# Pass with: guardian proxy --caveats examples/proxy/caveats.example.toml
+#
+# One [target] table per brokered host. All fields are optional; an absent target
+# is unconstrained by the broker (the policy still decides allow/deny). These are an
+# ADDITIONAL gate the broker enforces before a held credential is used.
+
+["account.example-bank.test"]
+# Reject use at or after this epoch-millis time (a short-lived grant).
+not_after_ms = 4102444800000          # 2100-01-01; set to a real near-future time
+# Only these destination hosts may use this capability.
+allowed_hosts = ["account.example-bank.test"]
+# Cap any amount this capability authorizes.
+max_amount = 0.0                       # read-only: never authorize a paid action
+# A critical action (money/credential/exfil/deletion) needs a FRESH approval —
+# a cached/automatic grant is never enough. Default: true.
+require_fresh_approval_for_critical = true

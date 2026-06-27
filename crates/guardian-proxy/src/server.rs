@@ -203,15 +203,36 @@ impl GuardianHandler {
 
     /// Turn a decided outcome into the proxy action: forward (attaching the broker
     /// credential to a real request, never to the CONNECT tunnel-setup) or block.
+    /// `freshly_approved` is true only when *this* request was just approved by a
+    /// human (not auto-allowed), so the capability caveats can require a fresh
+    /// approval for critical use (§8.1).
     fn respond(
         &self,
         mut req: Request<Body>,
         action: &Action,
         outcome: &EvalOutcome,
+        freshly_approved: bool,
     ) -> RequestOrResponse {
         let is_connect = req.method() == http::Method::CONNECT;
         match classify(action, outcome, &self.broker) {
             ProxyOutcome::Forward { authorization } => {
+                // Least-privilege caveat gate (§8.1): an allowed request to a host
+                // with broker caveats must still satisfy them (expiry / allowed
+                // hosts / max amount / fresh approval for critical).
+                if let Some(host) = action.context.host.as_deref() {
+                    let cap_req = guardian_broker::CapabilityRequest {
+                        host,
+                        now_ms: action.context.timestamp_ms,
+                        amount: None, // HTTP amount is not parsed here
+                        critical: outcome.critical,
+                        freshly_approved,
+                    };
+                    if let Err(violation) = self.broker.authorize(host, &cap_req) {
+                        return RequestOrResponse::Response(block_response(&format!(
+                            "capability caveat: {violation}"
+                        )));
+                    }
+                }
                 if !is_connect {
                     if let Some(auth) = authorization {
                         // The agent never supplied this; the broker did, post-allow.
@@ -251,7 +272,8 @@ impl GuardianHandler {
                 "Guardian audit log unavailable; request blocked (fail-closed)",
             ));
         }
-        self.respond(req, &action, &outcome)
+        // Sync path: no human attached, so nothing is freshly approved.
+        self.respond(req, &action, &outcome, false)
     }
 
     /// Resolve an `ask` through the human cockpit (if an approver is wired), then
@@ -263,20 +285,22 @@ impl GuardianHandler {
         action: Action,
         mut outcome: EvalOutcome,
     ) -> RequestOrResponse {
+        let mut freshly_approved = false;
         if let Decision::Ask { reason } = &outcome.decision {
             if let Some(approver) = &self.approver {
                 let reason = reason.clone();
                 tracing::info!(action_id = %action.id.as_str(), "routing ask to the cockpit");
-                outcome.decision = if approver.approve(&action).await {
-                    Decision::Allow
+                if approver.approve(&action).await {
+                    outcome.decision = Decision::Allow;
+                    freshly_approved = true; // a human just approved THIS request
                 } else {
-                    Decision::Deny {
+                    outcome.decision = Decision::Deny {
                         reason: format!("denied at review: {reason}"),
-                    }
-                };
+                    };
+                }
             }
         }
-        self.respond(req, &action, &outcome)
+        self.respond(req, &action, &outcome, freshly_approved)
     }
 
     /// Append the decision to the audit log. Returns `false` if it could not be
@@ -626,6 +650,39 @@ explain = "WebSocket upgrades are not allowed by this policy."
         match h.resolve_and_respond(req, action, outcome).await {
             RequestOrResponse::Response(resp) => assert_eq!(resp.status(), StatusCode::FORBIDDEN),
             RequestOrResponse::Request(_) => panic!("a denied ask must be blocked"),
+        }
+    }
+
+    #[test]
+    fn an_expired_capability_blocks_an_otherwise_allowed_request() {
+        // GET to bank.local is allowed by the policy, but the broker capability for
+        // that host expired (§8.1) → blocked at the caveat gate.
+        let policy = CompiledPolicy::from_toml_str(POLICY).unwrap();
+        let env = EvalEnv {
+            user_home: "/h".to_string(),
+            trusted_hosts: vec![],
+        };
+        let mut broker = Broker::new(HashMap::from([(
+            "bank.local".to_string(),
+            TOKEN.to_string(),
+        )]));
+        broker.set_caveats(
+            "bank.local",
+            guardian_broker::Caveats {
+                not_after_ms: Some(1), // far in the past relative to now()
+                ..guardian_broker::Caveats::permissive()
+            },
+        );
+        let audit = AuditLog::open_in_memory().unwrap();
+        let h = GuardianHandler::new(
+            Arc::new(policy),
+            Arc::new(env),
+            Arc::new(broker),
+            Arc::new(Mutex::new(audit)),
+        );
+        match h.mediate_request(request("GET", "http://bank.local/balance"), &sig()) {
+            RequestOrResponse::Response(resp) => assert_eq!(resp.status(), StatusCode::FORBIDDEN),
+            RequestOrResponse::Request(_) => panic!("an expired capability must block"),
         }
     }
 
