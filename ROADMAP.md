@@ -695,7 +695,7 @@ The MVP cuts corners that a real product cannot. These make the existing core
 | **M0** Skeleton | Phase 0 | ✅ done |
 | **M1** MVP | Phase 1 (§6) — the E2E demo | ✅ substantially done (engine, audit, gateway, daemon, CLI, TUI, hook) |
 | **M2** Contained | Phase 2 — proxy + sandbox + hook adapter + **MCP proxy (§7.5)** | 🟢 **done**: hook (§7.4), network proxy w/ TLS MITM + broker injection + body-exfil inspection + ask→cockpit (§7.1), CA-trust onboarding (§7.2), exec sandbox (§7.3), stdio MCP proxy (§7.5). Tracked niceties: WS frame inspection, Tauri CA button, Windows sandbox, Streamable HTTP (deferred). |
-| **M3** Delegated | Phase 3 — broker, learning, report, signed packs | pending (+4–6 wks) |
+| **M3** Delegated | Phase 3 — broker, learning, report, signed packs | 🟢 **done (pragmatic)**: broker OS-keychain + least-privilege caveats (§8.1), constrained adaptive suggestions (§8.2), safety report (§8.3), ed25519-signed policy packs (§8.4), lightweight verifiable credentials (§8.5), agent-adapter integrations (§8.6). Deferred w/ rationale: OAuth/hardware-keys/zeroize, full W3C-VC/DID interop, pack review/reputation registry. |
 | **Mp** Product | §9b productionization (persisted/signed audit, config, IPC, Checker, observability) | pending (+2–3 wks) |
 | **M4** 1.0 | Phase 4 — hardening + packaging + docs | pending (+3–4 wks) |
 
