@@ -539,7 +539,12 @@ tamper-evident log — **with no LLM in the deny path**.
       pack that `allow`s a `critical = true` rule unless `allow_critical`; verify can
       record provenance (publisher, name, version) into the audit log. **Remaining:**
       a review/reputation registry and pack-loading wired into the daemon/gateway.
-- [ ] 8.5 W3C Verifiable Credentials / DIDs (`ssi`) for decentralized identity.
+- [~] 8.5 W3C Verifiable Credentials / DIDs (`ssi`) for decentralized identity.
+      **Done (lightweight):** `guardian-broker::credential` — verify an
+      **issuer-signed, expiring claim about a subject** (ed25519), with trusted-issuer
+      pinning. This is the trust primitive. **Deferred:** full W3C VC + DID-method +
+      JSON-LD interop via the heavy `ssi` stack (large dependency for interop not yet
+      needed); it can layer on top of this verifier.
 - [~] 8.6 More adapters: Cursor, OpenAI Agents runtime, generic MCP clients.
       **Done:** because Guardian is agent-agnostic, these need no new code — they
       speak MCP (`guardian mcp` proxy, incl. a Cursor/Claude-Desktop config snippet)

@@ -57,8 +57,18 @@ with the `cargo deny` supply-chain gate — and because the **agent never holds 
 credential**, a macaroon bearer token buys little here. If cryptographic *delegation*
 is needed later, capabilities can be HMAC/ed25519-backed with crates we already use.
 
+## Verifiable credentials (`credential` module, §8.5)
+`credential::verify` checks an **issuer-signed, expiring claim about a subject**
+(ed25519): the signature is valid for the embedded issuer key, the issuer is the
+pinned `trusted` one (when required), and it hasn't expired. `issue` signs one. This
+is the decentralized-identity trust primitive (issuer-signed claims about a
+principal, no central account). Implemented **dependency-light** with the ed25519 we
+already use; **full W3C VC + DID-method + JSON-LD interop (the heavy `ssi` stack) is
+deferred** — it would reuse this verifier.
+
 ## Remaining (Phase 3)
-Scoped **OAuth**, hardware-backed keys, in-memory secret zeroize.
+Scoped **OAuth**, hardware-backed keys, in-memory secret zeroize, and full W3C/DID
+interop.
 
 ## Dependencies
 `serde_json`, `toml`, `thiserror`, `keyring` (per-platform native backends). No
