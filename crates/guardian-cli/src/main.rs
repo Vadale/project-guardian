@@ -105,6 +105,10 @@ enum Command {
         /// credential as `Authorization` only on an allowed request.
         #[arg(long)]
         secrets: Option<PathBuf>,
+        /// Load the secret for this target from the **OS keychain** instead of a
+        /// file (repeatable). Manage it with `guardian broker set <target>`.
+        #[arg(long = "keychain")]
+        keychain: Vec<String>,
         /// Audit-log file (default: `$GUARDIAN_AUDIT`, else `~/.guardian/audit.db`).
         #[arg(long)]
         audit: Option<PathBuf>,
@@ -122,6 +126,13 @@ enum Command {
         /// onboarding), then exit. Security-sensitive — see the printed warning.
         #[arg(long)]
         install_ca: bool,
+    },
+    /// Manage broker secrets in the OS keychain (Phase 3): store/remove/check the
+    /// credentials Guardian injects, so they live in the platform credential store,
+    /// never plaintext on disk and never shown to the agent.
+    Broker {
+        #[command(subcommand)]
+        action: BrokerAction,
     },
     /// Decide an `exec`-class command against the policy and, if allowed, run it —
     /// **sandboxed** (no network, read-only FS) when the matched rule sets
@@ -146,6 +157,17 @@ enum Command {
         #[arg(last = true, required = true)]
         cmd: Vec<String>,
     },
+}
+
+#[derive(Subcommand)]
+enum BrokerAction {
+    /// Store a secret for <target>, read from **stdin** (so it's not in your shell
+    /// history): e.g. `printf %s "$TOKEN" | guardian broker set api.example.com`.
+    Set { target: String },
+    /// Remove the secret for <target> (a no-op if there is none).
+    Delete { target: String },
+    /// Report whether a secret is stored for <target> — never prints the value.
+    Has { target: String },
 }
 
 #[tokio::main]
@@ -176,6 +198,7 @@ async fn main() -> anyhow::Result<()> {
             listen,
             policy,
             secrets,
+            keychain,
             audit,
             ca_dir,
             daemon,
@@ -186,6 +209,7 @@ async fn main() -> anyhow::Result<()> {
                 listen,
                 policy,
                 secrets,
+                keychain,
                 audit,
                 ca_dir,
                 daemon,
@@ -194,6 +218,7 @@ async fn main() -> anyhow::Result<()> {
             )
             .await
         }
+        Command::Broker { action } => run_broker(action),
         Command::Exec {
             policy,
             audit,
@@ -312,6 +337,7 @@ async fn run_proxy(
     listen: String,
     policy_path: Option<PathBuf>,
     secrets: Option<PathBuf>,
+    keychain: Vec<String>,
     audit: Option<PathBuf>,
     ca_dir: Option<PathBuf>,
     daemon: Option<PathBuf>,
@@ -342,17 +368,40 @@ async fn run_proxy(
     let policy = Arc::new(load_policy(&policy_path)?);
     let env = Arc::new(eval_env());
 
-    let broker = match &secrets {
+    let mut broker = match &secrets {
         Some(path) => {
             warn_if_world_readable(path);
             let src = std::fs::read_to_string(path)?;
-            Arc::new(
-                guardian_broker::Broker::from_toml_str(&src)
-                    .map_err(|e| anyhow::anyhow!("secrets file {}: {e}", path.display()))?,
-            )
+            guardian_broker::Broker::from_toml_str(&src)
+                .map_err(|e| anyhow::anyhow!("secrets file {}: {e}", path.display()))?
         }
-        None => Arc::new(guardian_broker::Broker::default()),
+        None => guardian_broker::Broker::default(),
     };
+    // Overlay any keychain-sourced secrets (preferred Phase 3 store).
+    if !keychain.is_empty() {
+        broker
+            .add_keychain_targets(&keychain)
+            .map_err(|e| anyhow::anyhow!("keychain: {e}"))?;
+        // Tell the operator which targets actually resolved (values never printed),
+        // so a typo or unstored target doesn't silently leave a host uncredentialed.
+        let (resolved, skipped): (Vec<_>, Vec<_>) = keychain.iter().partition(|t| broker.has(t));
+        eprintln!(
+            "keychain: {} resolved, {} not found",
+            resolved.len(),
+            skipped.len()
+        );
+        if !skipped.is_empty() {
+            eprintln!(
+                "  not in keychain (no credential): {}",
+                skipped
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+    }
+    let broker = Arc::new(broker);
 
     let audit_path = audit
         .or_else(|| std::env::var_os("GUARDIAN_AUDIT").map(PathBuf::from))
@@ -443,6 +492,35 @@ fn ca_trust_instructions(cert_path: &std::path::Path) -> String {
     } else {
         format!("Trust this certificate in your system/client trust store: {p}")
     }
+}
+
+/// Manage broker secrets in the OS keychain. `set` reads the secret from stdin so
+/// it never lands in the shell history or process arguments.
+fn run_broker(action: BrokerAction) -> anyhow::Result<()> {
+    use guardian_broker::keychain;
+    use std::io::Read;
+    match action {
+        BrokerAction::Set { target } => {
+            let mut secret = String::new();
+            std::io::stdin().read_to_string(&mut secret)?;
+            let secret = secret.trim_end_matches(['\n', '\r']);
+            if secret.is_empty() {
+                anyhow::bail!("no secret on stdin; nothing stored (pipe it in, e.g. `printf %s \"$TOKEN\" | guardian broker set {target}`)");
+            }
+            keychain::store(&target, secret)?;
+            println!("Stored a secret for {target} in the OS keychain.");
+        }
+        BrokerAction::Delete { target } => {
+            keychain::delete(&target)?;
+            println!("Removed any secret for {target}.");
+        }
+        BrokerAction::Has { target } => {
+            // Never print the value — only whether one exists.
+            let present = keychain::load(&target)?.is_some();
+            println!("{}", if present { "present" } else { "absent" });
+        }
+    }
+    Ok(())
 }
 
 /// Browse the tamper-evident audit log: print recent decisions and the integrity
