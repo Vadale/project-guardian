@@ -599,8 +599,12 @@ tamper-evident log — **with no LLM in the deny path**.
       default, and a `--require-signed-policy` loader flag.
 - [ ] 9.3 Packaging: signed/notarized macOS build, Windows installer, Linux
       packages; Tauri bundler.
-- [ ] 9.4 Docs: user guide, policy-authoring guide, adapter-authoring guide,
-      threat model finalized, ADRs.
+- [x] 9.4 Docs: user guide, policy-authoring guide, adapter-authoring guide,
+      threat model finalized, ADRs. **Done:** `docs/user-guide.md` (end-to-end
+      getting started), `docs/policy-authoring.md` (how-to + patterns; the formal
+      schema is `docs/policy-schema.md`), `docs/integrations.md` (adapter authoring),
+      `docs/threat-model.md` (residual risks current through Phase 4), `docs/adr/`,
+      and the README status refreshed. Per-crate docs in `docs/architecture/`.
 - [x] 9.5 Performance: confirm the green fast-path never invokes the LLM; measure
       added latency per action; budget and document it. **Done:** the fast path is
       test-proven to never call the Checker (`checker_is_not_called_on_the_fast_path`);

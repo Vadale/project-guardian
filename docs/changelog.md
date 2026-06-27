@@ -8,6 +8,13 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 ## [Unreleased] — design phase
 
 ### Implemented — 2026-06-27 (Phase 4 — Hardening)
+- **Docs finalized (Phase 4 / §9.4)** — `docs/user-guide.md` (end-to-end getting
+  started for the three integration modes + the flagship use case), and
+  `docs/policy-authoring.md` (a practical how-to + patterns, complementing the formal
+  `docs/policy-schema.md`). Adapter authoring lives in `docs/integrations.md`; the
+  threat model (`docs/threat-model.md`) carries residual risks current through Phase
+  4; ADRs in `docs/adr/`. The README status blurb was refreshed (it claimed "62 tests
+  / next: proxy/sandbox/broker…" — all now landed through Phase 4).
 - **Sealed-key audit signing (`guardian-audit` + `guardian log --verify-key`, Phase 4
   / §9.2)** — the tamper-evident log can now be **ed25519-signed at the head**:
   `AuditLog::open_signed(path, key)` signs `seq || head_hash` on every append, so an
