@@ -8,6 +8,13 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 ## [Unreleased] — design phase
 
 ### Implemented — 2026-06-27 (Phase 3 — Identity)
+- **Integrations guide — agent adapters (`docs/integrations.md`, Phase 3 / §8.6)** —
+  documents how to put Guardian in front of any harness using the **existing**
+  interception boundaries (no new code, because Guardian mediates at the action
+  boundary, not inside a harness): `guardian mcp` for MCP hosts (Cursor / Claude
+  Desktop config snippet, generic MCP agents), `guardian hook` for Claude Code's
+  native tools, and `guardian proxy` for any raw-HTTP agent (OpenAI Agents runtime,
+  browser tools, scripts). All three share the same policy, broker, and audit log.
 - **Safety report + constrained adaptive suggestions (`guardian-audit::report` +
   `guardian report`, Phase 3 / §8.3 + §8.2)** — `guardian report [--window N]`
   summarizes a recent window of the audit log: allow/ask/deny counts, the **top
