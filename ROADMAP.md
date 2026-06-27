@@ -534,7 +534,12 @@ tamper-evident log — **with no LLM in the deny path**.
       record provenance (publisher, name, version) into the audit log. **Remaining:**
       a review/reputation registry and pack-loading wired into the daemon/gateway.
 - [ ] 8.5 W3C Verifiable Credentials / DIDs (`ssi`) for decentralized identity.
-- [ ] 8.6 More adapters: Cursor, OpenAI Agents runtime, generic MCP clients.
+- [~] 8.6 More adapters: Cursor, OpenAI Agents runtime, generic MCP clients.
+      **Done:** because Guardian is agent-agnostic, these need no new code — they
+      speak MCP (`guardian mcp` proxy, incl. a Cursor/Claude-Desktop config snippet)
+      or raw HTTP (`guardian proxy`). Documented end to end in
+      [`docs/integrations.md`](docs/integrations.md). **Remaining:** a native
+      tool-call hook adapter for any harness that has one (like Claude Code's).
 
 > 🤖 **Reusable prompt — Task 8.1 (token broker)**
 > ```
