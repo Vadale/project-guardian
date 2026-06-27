@@ -8,6 +8,16 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 ## [Unreleased] — design phase
 
 ### Implemented — 2026-06-27 (Phase 3 — Identity)
+- **Lightweight verifiable credentials (`guardian-broker::credential`, Phase 3 /
+  §8.5)** — verify an **issuer-signed, expiring claim about a subject** (ed25519):
+  `Credential { subject, issuer, claims, not_after_ms }` + `SignedCredential`;
+  `issue()` signs, `verify(now, trusted_issuer)` checks the signature, optional
+  trusted-issuer pin, and expiry. This is decentralized-identity-style (issuer-signed
+  claims, no central account) and the **trust primitive** for principal identity.
+  Implemented dependency-light with the ed25519 we already use; **full W3C VC +
+  DID-method + JSON-LD interop (the heavy `ssi` stack) is deferred** — it can layer
+  on this verifier. 4 tests (verifies+claims, tampered-claim → invalid, untrusted
+  issuer, expired).
 - **Least-privilege capability caveats (`guardian-broker::capability` + `guardian
   proxy --caveats`, Phase 3 / §8.1)** — a brokered target can carry **caveats** that
   attenuate how its credential may be used: **expiry** (`not_after_ms`),

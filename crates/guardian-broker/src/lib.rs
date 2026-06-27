@@ -13,6 +13,7 @@
 #![forbid(unsafe_code)]
 
 pub mod capability;
+pub mod credential;
 pub mod keychain;
 
 pub use capability::{CapabilityRequest, CaveatViolation, Caveats};
