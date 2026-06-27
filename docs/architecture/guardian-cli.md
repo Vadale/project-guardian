@@ -35,6 +35,10 @@ front-end over the other crates — no policy logic of its own.
   (`DaemonApprover`) — the proxy keeps owning the upstream. With `--daemon` alone,
   bridges to a running daemon (`DaemonRouter`). With neither, a self-contained
   gateway over the built-in tools whose `ask` decisions fail closed.
+- **`log [--audit <path>] [--limit N]`** — a read-only browser for the tamper-evident
+  audit log (the "black box"): prints the integrity status (`verify()` → OK/TAMPERED),
+  the entry count, and a table of recent decisions. Resilient to a corrupt row
+  (renders `<unreadable>`); never modifies the log.
 - **`ui [--daemon <socket>] [--demo]`** — the terminal cockpit (see below).
 
 ## Terminal cockpit (`src/tui.rs`)
