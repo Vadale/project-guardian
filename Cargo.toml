@@ -49,3 +49,4 @@ guardian-mcp-gateway = { path = "crates/guardian-mcp-gateway" }
 guardian-broker = { path = "crates/guardian-broker" }
 guardian-daemon = { path = "crates/guardian-daemon" }
 guardian-proxy = { path = "crates/guardian-proxy" }
+guardian-sandbox = { path = "crates/guardian-sandbox" }

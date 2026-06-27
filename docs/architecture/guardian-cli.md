@@ -39,6 +39,16 @@ front-end over the other crates — no policy logic of its own.
   audit log (the "black box"): prints the integrity status (`verify()` → OK/TAMPERED),
   the entry count, and a table of recent decisions. Resilient to a corrupt row
   (renders `<unreadable>`); never modifies the log.
+- **`proxy [--listen <addr>] [--policy] [--secrets] [--audit] [--ca-dir] [--print-ca-path]`**
+  — the user-space HTTP(S) forward proxy (Phase 2). Point the agent's
+  `HTTP_PROXY`/`HTTPS_PROXY` at it; mediates web traffic with the same policy +
+  token broker, generates/uses a local CA for HTTPS interception (`--print-ca-path`
+  shows the cert to install). Backed by `guardian-proxy`.
+- **`exec [--policy] [--audit] [--allow-network] [--writable <path>] -- <cmd> …`** —
+  decide an `exec`-class command against the policy and, if allowed, run it —
+  **sandboxed** (network/FS restricted) when the matched rule sets `sandbox = true`
+  (`guardian-sandbox`). Refuses on deny/ask (exit 126); fails closed if a sandbox is
+  required but no backend is installed.
 - **`ui [--daemon <socket>] [--demo]`** — the terminal cockpit (see below).
 
 ## Terminal cockpit (`src/tui.rs`)

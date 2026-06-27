@@ -115,6 +115,29 @@ enum Command {
         #[arg(long)]
         print_ca_path: bool,
     },
+    /// Decide an `exec`-class command against the policy and, if allowed, run it —
+    /// **sandboxed** (no network, read-only FS) when the matched rule sets
+    /// `sandbox = true` (ROADMAP §7.3). Usage: `guardian exec [opts] -- <cmd> [args…]`.
+    Exec {
+        /// Policy file (defaults to the built-in demo policy).
+        #[arg(long)]
+        policy: Option<PathBuf>,
+        /// Audit-log file (default: `$GUARDIAN_AUDIT`, else `~/.guardian/audit.db`).
+        #[arg(long)]
+        audit: Option<PathBuf>,
+        /// Allow outbound network inside the sandbox (default: denied). **Operator
+        /// input** — set by whoever runs `guardian exec`, not by the agent (whose
+        /// input is only the command after `--`).
+        #[arg(long)]
+        allow_network: bool,
+        /// Extra path the sandboxed command may write to (repeatable). **Operator
+        /// input** — must not be sourced from the agent.
+        #[arg(long = "writable")]
+        writable: Vec<PathBuf>,
+        /// The command and its arguments, after `--`.
+        #[arg(last = true, required = true)]
+        cmd: Vec<String>,
+    },
 }
 
 #[tokio::main]
@@ -149,7 +172,114 @@ async fn main() -> anyhow::Result<()> {
             ca_dir,
             print_ca_path,
         } => run_proxy(listen, policy, secrets, audit, ca_dir, print_ca_path).await,
+        Command::Exec {
+            policy,
+            audit,
+            allow_network,
+            writable,
+            cmd,
+        } => run_exec(policy, audit, allow_network, writable, cmd),
     }
+}
+
+/// Decide an exec command against the policy and, if allowed, run it — sandboxed
+/// when the matched rule requested it. Exits non-zero on deny/ask, on a missing
+/// sandbox backend for a sandboxed action (fail closed), or with the child's code.
+fn run_exec(
+    policy_path: Option<PathBuf>,
+    audit: Option<PathBuf>,
+    allow_network: bool,
+    writable: Vec<PathBuf>,
+    cmd: Vec<String>,
+) -> anyhow::Result<()> {
+    use guardian_sandbox::{detect, SandboxOpts};
+
+    let (program, args) = cmd.split_first().expect("clap requires a command");
+    let call = ToolCall {
+        tool: program.clone(),
+        args: json!({ "cmd": cmd.join(" ") }),
+        kind: Some(ActionKind::Exec),
+        capability: None,
+    };
+    let action =
+        guardian_mcp_gateway::build_action(&call, "exec", ActionId::new("exec"), now_ms_cli());
+
+    let policy = load_policy(&policy_path)?;
+    let outcome = policy.evaluate(&action, &eval_env());
+
+    // Record the decision (best-effort: the audit log is the forensic record, not a
+    // gate for the local exec front-end).
+    let audit_path = audit
+        .or_else(|| std::env::var_os("GUARDIAN_AUDIT").map(PathBuf::from))
+        .unwrap_or_else(|| guardian_daemon::config::guardian_dir().join("audit.db"));
+    if let Some(parent) = audit_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match AuditLog::open(&audit_path) {
+        Ok(mut log) => {
+            let entry = guardian_audit::AuditEntry::for_decision(
+                &action,
+                &outcome.decision,
+                outcome.matched_rule.clone(),
+                None,
+                None,
+            );
+            if log.append(&entry).is_err() {
+                eprintln!("guardian: warning: could not write the audit entry for this exec");
+            }
+        }
+        Err(e) => eprintln!("guardian: warning: could not open the audit log ({e})"),
+    }
+
+    match &outcome.decision {
+        Decision::Deny { reason } => {
+            eprintln!("guardian: denied: {reason}");
+            std::process::exit(126);
+        }
+        Decision::Ask { reason } => {
+            // No human is attached to this one-shot front-end: fail closed.
+            eprintln!("guardian: needs approval, not running: {reason}");
+            std::process::exit(126);
+        }
+        Decision::Allow => {}
+    }
+
+    let status = if outcome.sandbox {
+        match detect() {
+            Some(runner) => {
+                eprintln!("guardian: running sandboxed via {}", runner.name());
+                let opts = SandboxOpts {
+                    allow_network,
+                    writable_paths: writable,
+                };
+                runner.run(program, args, &opts)
+            }
+            None => {
+                // Policy demanded a sandbox but none is available → fail closed.
+                eprintln!("guardian: policy requires a sandbox but no backend is available; refusing to run unconfined");
+                std::process::exit(126);
+            }
+        }
+    } else {
+        std::process::Command::new(program).args(args).status()
+    };
+
+    match status {
+        Ok(st) => std::process::exit(st.code().unwrap_or(1)),
+        Err(e) => {
+            eprintln!("guardian: failed to run {program}: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Wall-clock milliseconds for the exec action's timestamp.
+fn now_ms_cli() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 /// Run the network proxy: load policy + broker + audit + local CA, then mediate
