@@ -8,6 +8,25 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 ## [Unreleased] — design phase
 
 ### Implemented — 2026-06-27
+- **Network proxy — mediation core (`guardian-proxy`, Phase 2 / ROADMAP §7.1)** —
+  the first increment of the user-space HTTP(S) forward proxy (decision recorded in
+  `docs/adr/0004-network-proxy.md`), built transport-first so the heavy TLS stack
+  stays isolated for a later increment. A new **transport-agnostic mediation core**
+  normalizes an outbound `HttpRequest` (method, host, path) into a
+  `guardian_core::Action` and runs it through the **same deterministic policy
+  engine** as the MCP gateway: `mediate()` returns `Forward` or `Block`. For an
+  **allowed** request to a brokered host it attaches the **token broker**'s value as
+  the `Authorization` (`Bearer …`) — so the agent never holds the credential, exactly
+  as on the MCP path — and **only** on `Allow`; `Deny` blocks, and `ask` **fails
+  closed** to a block at this layer (no human is attached yet — the live proxy will
+  route `ask` to the cockpit). The request **host is normalized** (lowercase, default
+  port stripped) so the policy context and the broker lookup can never silently
+  diverge on `Bank.local:443` vs `bank.local`. `ProxyOutcome`'s `Debug` **redacts the
+  token** (mirrors `Broker`'s redacted `Debug`) so a stray `{:?}` can't leak it. Added
+  `Broker::token_for()` (raw token for header building). 6 unit tests; no TLS/network
+  deps yet. Reviewed by `code-reviewer` (approve-with-nits → host normalization and
+  redacting `Debug` applied; audit recording + `matched_rule` threading tracked for
+  the live-proxy increment in the ADR).
 - **Audit-log browser (`guardian log`)** — a read-only viewer for the tamper-evident
   log (the "black box"): `guardian log [--audit <path>] [--limit N]` opens the
   persistent log (`$GUARDIAN_AUDIT`, else `~/.guardian/audit.db`), prints the

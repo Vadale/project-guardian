@@ -753,6 +753,12 @@ dependencies = [
 [[package]]
 name = "guardian-proxy"
 version = "0.0.0"
+dependencies = [
+ "guardian-broker",
+ "guardian-core",
+ "guardian-policy",
+ "serde_json",
+]
 
 [[package]]
 name = "h2"
