@@ -11,9 +11,10 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use async_trait::async_trait;
 use guardian_audit::{AuditEntry, AuditLog};
 use guardian_broker::Broker;
-use guardian_core::Action;
+use guardian_core::{Action, Decision};
 use guardian_policy::{CompiledPolicy, EvalEnv, EvalOutcome};
 
 use http::{header, HeaderValue, Request, Response, StatusCode};
@@ -64,6 +65,16 @@ pub enum ProxyError {
     Hudsucker(#[from] hudsucker::Error),
 }
 
+/// Routes a policy `ask` to a human and waits for the verdict. Implemented outside
+/// this crate (e.g. the CLI bridges it to the daemon cockpit), so the proxy stays
+/// decoupled from the IPC layer. Returning `false` (incl. timeout) blocks — the
+/// queue is fail-closed, so a no-answer is a deny.
+#[async_trait]
+pub trait Approver: Send + Sync {
+    /// Ask a human to approve this pending action; `true` allows it.
+    async fn approve(&self, action: &Action) -> bool;
+}
+
 /// The per-request handler. Cheap to clone (hudsucker clones it per connection):
 /// the policy/broker are shared `Arc`s and the audit log is behind a `Mutex`.
 #[derive(Clone)]
@@ -72,6 +83,8 @@ pub struct GuardianHandler {
     env: Arc<EvalEnv>,
     broker: Arc<Broker>,
     audit: Arc<Mutex<AuditLog>>,
+    /// Optional human-in-the-loop for `ask` decisions. Without it, `ask` fails closed.
+    approver: Option<Arc<dyn Approver>>,
 }
 
 impl GuardianHandler {
@@ -86,7 +99,15 @@ impl GuardianHandler {
             env,
             broker,
             audit,
+            approver: None,
         }
+    }
+
+    /// Route `ask` decisions to a human approver (e.g. the daemon cockpit). Without
+    /// one, `ask` fails closed (blocked).
+    pub fn with_approver(mut self, approver: Arc<dyn Approver>) -> Self {
+        self.approver = Some(approver);
+        self
     }
 
     /// Buffer the request body (capped) so the policy can inspect it for
@@ -147,20 +168,16 @@ impl GuardianHandler {
         }
     }
 
-    /// The whole decision, independent of hudsucker's (non-constructible) context,
-    /// so it is unit-testable: normalize → evaluate → audit → forward-or-block.
-    fn mediate_request(
+    /// Normalize the request, attach inspection signals, and evaluate the policy.
+    /// Pure prep — no I/O, no human — so both the sync and async decision paths
+    /// share it. A CONNECT is normalized too: we police the tunnel **authority**
+    /// (default-deny egress), and the decrypted inner requests are mediated when
+    /// hudsucker re-invokes us.
+    fn prepare(
         &self,
-        mut req: Request<Body>,
+        req: Request<Body>,
         signals: &RequestSignals,
-    ) -> RequestOrResponse {
-        // A CONNECT asks for a tunnel to a host; the decrypted requests *inside* it
-        // are mediated separately when hudsucker re-invokes us. We still police the
-        // CONNECT **authority** itself, so an un-allowed host gets no tunnel at all
-        // (default-deny egress). Otherwise a non-HTTP protocol spoken inside an
-        // allowed-by-omission tunnel would be an unmediated channel to the world.
-        let is_connect = req.method() == http::Method::CONNECT;
-
+    ) -> (Request<Body>, Action, EvalOutcome) {
         let summary = summarize(&req);
         let mut action = to_action(&summary);
         action.context.timestamp_ms = now_ms();
@@ -181,25 +198,20 @@ impl GuardianHandler {
             extra.insert("upgrade".into(), "websocket".into());
         }
         let outcome = self.policy.evaluate(&action, &self.env);
+        (req, action, outcome)
+    }
 
-        // Record every decision before acting on it (invariant 7). This is the
-        // network **egress** path — the critical path — so if the decision cannot
-        // be durably recorded we **fail closed** rather than forward an unlogged
-        // request (invariant 5).
-        if !self.record(&action, &outcome) {
-            tracing::error!(
-                action_id = %action.id.as_str(),
-                "audit append failed; failing closed on the proxy path"
-            );
-            return RequestOrResponse::Response(block_response(
-                "Guardian audit log unavailable; request blocked (fail-closed)",
-            ));
-        }
-
-        match classify(&action, &outcome, &self.broker) {
+    /// Turn a decided outcome into the proxy action: forward (attaching the broker
+    /// credential to a real request, never to the CONNECT tunnel-setup) or block.
+    fn respond(
+        &self,
+        mut req: Request<Body>,
+        action: &Action,
+        outcome: &EvalOutcome,
+    ) -> RequestOrResponse {
+        let is_connect = req.method() == http::Method::CONNECT;
+        match classify(action, outcome, &self.broker) {
             ProxyOutcome::Forward { authorization } => {
-                // Attach the broker credential to a real request only — never to the
-                // CONNECT tunnel-setup (the credential belongs on the inner request).
                 if !is_connect {
                     if let Some(auth) = authorization {
                         // The agent never supplied this; the broker did, post-allow.
@@ -212,6 +224,59 @@ impl GuardianHandler {
             }
             ProxyOutcome::Block { reason } => RequestOrResponse::Response(block_response(&reason)),
         }
+    }
+
+    /// Audit before acting (invariant 7). Returns `false` if the decision could not
+    /// be durably recorded — on this network **egress** path the caller fails closed
+    /// (invariant 5) rather than forward an unlogged request.
+    fn record_or_fail(&self, action: &Action, outcome: &EvalOutcome) -> bool {
+        if self.record(action, outcome) {
+            return true;
+        }
+        tracing::error!(
+            action_id = %action.id.as_str(),
+            "audit append failed; failing closed on the proxy path"
+        );
+        false
+    }
+
+    /// Synchronous decision seam for the unit tests (the live path is
+    /// `prepare` → `record_or_fail` → [`resolve_and_respond`](Self::resolve_and_respond),
+    /// which this mirrors for the no-approver case where `ask` fails closed).
+    #[cfg(test)]
+    fn mediate_request(&self, req: Request<Body>, signals: &RequestSignals) -> RequestOrResponse {
+        let (req, action, outcome) = self.prepare(req, signals);
+        if !self.record_or_fail(&action, &outcome) {
+            return RequestOrResponse::Response(block_response(
+                "Guardian audit log unavailable; request blocked (fail-closed)",
+            ));
+        }
+        self.respond(req, &action, &outcome)
+    }
+
+    /// Resolve an `ask` through the human cockpit (if an approver is wired), then
+    /// respond. Without an approver, `ask` stays `ask` and `classify` blocks it —
+    /// fail closed either way. Async because human approval is awaited.
+    async fn resolve_and_respond(
+        &self,
+        req: Request<Body>,
+        action: Action,
+        mut outcome: EvalOutcome,
+    ) -> RequestOrResponse {
+        if let Decision::Ask { reason } = &outcome.decision {
+            if let Some(approver) = &self.approver {
+                let reason = reason.clone();
+                tracing::info!(action_id = %action.id.as_str(), "routing ask to the cockpit");
+                outcome.decision = if approver.approve(&action).await {
+                    Decision::Allow
+                } else {
+                    Decision::Deny {
+                        reason: format!("denied at review: {reason}"),
+                    }
+                };
+            }
+        }
+        self.respond(req, &action, &outcome)
     }
 
     /// Append the decision to the audit log. Returns `false` if it could not be
@@ -238,7 +303,13 @@ impl HttpHandler for GuardianHandler {
         req: Request<Body>,
     ) -> RequestOrResponse {
         let (req, signals) = self.inspect(req).await;
-        self.mediate_request(req, &signals)
+        let (req, action, outcome) = self.prepare(req, &signals);
+        if !self.record_or_fail(&action, &outcome) {
+            return RequestOrResponse::Response(block_response(
+                "Guardian audit log unavailable; request blocked (fail-closed)",
+            ));
+        }
+        self.resolve_and_respond(req, action, outcome).await
     }
 }
 
@@ -524,5 +595,46 @@ explain = "WebSocket upgrades are not allowed by this policy."
         let (_req, signals) = h.inspect(req).await;
         assert!(!signals.inspected);
         assert!(!signals.contains_known_secret);
+    }
+
+    /// A test approver that always answers the same way.
+    struct Always(bool);
+    #[async_trait]
+    impl Approver for Always {
+        async fn approve(&self, _action: &Action) -> bool {
+            self.0
+        }
+    }
+
+    // `PUT example.com` matches no rule → default `ask`, so these exercise the
+    // human-in-the-loop path. (Without an approver, `ask` is blocked.)
+    #[tokio::test]
+    async fn ask_is_allowed_when_the_human_approves() {
+        let h = handler().with_approver(Arc::new(Always(true)));
+        let (req, action, outcome) = h.prepare(request("PUT", "http://example.com/x"), &sig());
+        match h.resolve_and_respond(req, action, outcome).await {
+            RequestOrResponse::Request(_) => {}
+            RequestOrResponse::Response(_) => panic!("an approved ask must be forwarded"),
+        }
+    }
+
+    #[tokio::test]
+    async fn ask_is_blocked_when_the_human_denies() {
+        let h = handler().with_approver(Arc::new(Always(false)));
+        let (req, action, outcome) = h.prepare(request("PUT", "http://example.com/x"), &sig());
+        match h.resolve_and_respond(req, action, outcome).await {
+            RequestOrResponse::Response(resp) => assert_eq!(resp.status(), StatusCode::FORBIDDEN),
+            RequestOrResponse::Request(_) => panic!("a denied ask must be blocked"),
+        }
+    }
+
+    #[tokio::test]
+    async fn ask_fails_closed_without_an_approver() {
+        let h = handler(); // no approver wired
+        let (req, action, outcome) = h.prepare(request("PUT", "http://example.com/x"), &sig());
+        match h.resolve_and_respond(req, action, outcome).await {
+            RequestOrResponse::Response(resp) => assert_eq!(resp.status(), StatusCode::FORBIDDEN),
+            RequestOrResponse::Request(_) => panic!("ask without an approver must fail closed"),
+        }
     }
 }

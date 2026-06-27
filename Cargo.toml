@@ -39,6 +39,7 @@ http = "1"
 hyper = "1"
 http-body-util = "0.1"
 bytes = "1"
+async-trait = "0.1"
 
 # Internal crates (path deps), referenced by dependents via `{ workspace = true }`.
 guardian-core = { path = "crates/guardian-core" }

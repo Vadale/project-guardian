@@ -8,6 +8,19 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 ## [Unreleased] — design phase
 
 ### Implemented — 2026-06-27
+- **Proxy `ask` → cockpit routing (`guardian-proxy` + `guardian proxy --daemon`,
+  Phase 2 / §7.1 increment 4)** — the network proxy can now resolve a yellow (`ask`)
+  decision through a **human**, completing the traffic-light model for web traffic.
+  A new `Approver` trait in `guardian-proxy` (kept decoupled from the daemon IPC) is
+  awaited on `ask`; the CLI bridges it to a running daemon's cockpit
+  (`ProxyDaemonApprover` → `DaemonClient::approve`). Approve → forward (with the
+  broker credential if brokered); deny **or any non-answer/timeout/unreachable
+  daemon → block** (the queue is fail-closed). Without `--daemon`, `ask` still fails
+  closed exactly as before. The decision pipeline was refactored into `prepare` →
+  `record_or_fail` (audit before acting; fail closed if unrecordable) →
+  `resolve_and_respond`. 3 new unit tests (ask approved → forward, denied → block,
+  no-approver → fail closed). Verified e2e: with an unreachable daemon an `ask`
+  request returns `403` and is audited.
 - **Exec sandbox backstop (`guardian-sandbox` + `guardian exec`, Phase 2 / ROADMAP
   §7.3)** — a new dependency-free crate that runs an `exec`-class action **contained**
   when the matched policy rule sets `sandbox = true`. Containment is delegated to an
