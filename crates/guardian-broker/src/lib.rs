@@ -56,6 +56,17 @@ impl Broker {
         self.secrets.get(target).map(String::as_str)
     }
 
+    /// Whether `haystack` contains **any** held secret value — i.e. the agent is
+    /// trying to send one of the user's credentials somewhere (exfiltration). Used
+    /// by the proxy to inspect outbound request bodies. Keeps the secrets inside
+    /// the broker: the caller passes the data and gets back only a boolean. A token
+    /// shorter than 8 bytes is ignored to avoid false positives on trivial values.
+    pub fn body_leaks_secret(&self, haystack: &str) -> bool {
+        self.secrets
+            .values()
+            .any(|token| token.len() >= 8 && haystack.contains(token.as_str()))
+    }
+
     /// Inject the credential for `target` into `args` under [`DEFAULT_FIELD`], so the
     /// agent never had to supply it. Returns `true` if a token was injected.
     /// `args` is coerced to an object if it is null. Never logs the token.
@@ -159,6 +170,20 @@ mod tests {
             args.get("auth_token").and_then(|v| v.as_str()),
             Some("secret-123")
         );
+    }
+
+    #[test]
+    fn body_leaks_secret_detects_a_held_token_in_outbound_data() {
+        let b = broker(); // holds "secret-123"
+        assert!(b.body_leaks_secret("payload=secret-123&x=1"));
+        assert!(!b.body_leaks_secret("nothing sensitive here"));
+    }
+
+    #[test]
+    fn body_leaks_secret_ignores_too_short_tokens() {
+        // A trivially short secret must not flag arbitrary bodies (false positives).
+        let b = Broker::new(HashMap::from([("t".to_string(), "abc".to_string())]));
+        assert!(!b.body_leaks_secret("abc appears but the token is too short"));
     }
 
     #[test]

@@ -37,6 +37,7 @@ hudsucker = "0.24"
 rcgen = { version = "0.14", features = ["x509-parser"] }
 http = "1"
 hyper = "1"
+http-body-util = "0.1"
 bytes = "1"
 
 # Internal crates (path deps), referenced by dependents via `{ workspace = true }`.

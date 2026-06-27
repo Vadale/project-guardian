@@ -1158,6 +1158,7 @@ dependencies = [
  "guardian-core",
  "guardian-policy",
  "http",
+ "http-body-util",
  "hudsucker",
  "hyper",
  "rcgen",

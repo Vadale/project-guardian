@@ -1,9 +1,10 @@
 //! The live forward proxy: wires the [mediation core](crate) onto real sockets
-//! via `hudsucker`. Every request is normalized, run through the **deterministic
-//! policy**, recorded to the **tamper-evident audit log**, and then either
-//! forwarded (with the broker's `Authorization` attached for a brokered host) or
-//! answered with a `403` carrying the block reason. The agent points
-//! `HTTP(S)_PROXY` at this server.
+//! via `hudsucker`. Every request is normalized, **inspected** (the body is
+//! buffered up to a cap and scanned for the user's own secrets; a WebSocket
+//! upgrade is noted), run through the **deterministic policy**, recorded to the
+//! **tamper-evident audit log**, and then either forwarded (with the broker's
+//! `Authorization` attached for a brokered host) or answered with a `403` carrying
+//! the block reason. The agent points `HTTP(S)_PROXY` at this server.
 
 use std::future::Future;
 use std::net::SocketAddr;
@@ -16,11 +17,44 @@ use guardian_core::Action;
 use guardian_policy::{CompiledPolicy, EvalEnv, EvalOutcome};
 
 use http::{header, HeaderValue, Request, Response, StatusCode};
+use http_body_util::BodyExt;
 use hudsucker::rustls::crypto::aws_lc_rs;
 use hudsucker::{Body, HttpContext, HttpHandler, Proxy, RequestOrResponse};
 
 use crate::ca::LocalCa;
 use crate::{classify, to_action, HttpRequest, ProxyOutcome};
+
+/// Largest request body the proxy buffers in memory for exfiltration inspection.
+/// Bodies above this (or with no `Content-Length`) are forwarded without buffering
+/// and reported as `inspected = false` to the policy.
+const BODY_INSPECT_CAP: usize = 1024 * 1024;
+
+/// What the proxy learned by looking at a request before deciding. Exposed to the
+/// policy under `action.context.extra` so rules can act on it.
+#[derive(Debug, Clone)]
+struct RequestSignals {
+    /// Whether the body was actually buffered and scanned.
+    inspected: bool,
+    /// Body length in bytes (from `Content-Length`, or the buffered size).
+    len: usize,
+    /// The body contains one of the broker's held secrets (exfiltration attempt).
+    contains_known_secret: bool,
+    /// The request is a WebSocket upgrade (`Upgrade: websocket`).
+    is_websocket_upgrade: bool,
+}
+
+impl RequestSignals {
+    /// Signals for a request whose body was not inspected (e.g. CONNECT, no body,
+    /// or over the cap) — the conservative default.
+    fn uninspected() -> Self {
+        Self {
+            inspected: false,
+            len: 0,
+            contains_known_secret: false,
+            is_websocket_upgrade: false,
+        }
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProxyError {
@@ -55,9 +89,71 @@ impl GuardianHandler {
         }
     }
 
+    /// Buffer the request body (capped) so the policy can inspect it for
+    /// exfiltration, and note a WebSocket upgrade. Rebuilds the request so it can
+    /// still be forwarded. A body with no `Content-Length` or larger than the cap
+    /// is left untouched and reported as `inspected = false` (CONNECT is never
+    /// buffered — it has no payload). Async because reading the body is async.
+    async fn inspect(&self, req: Request<Body>) -> (Request<Body>, RequestSignals) {
+        let is_websocket_upgrade = req
+            .headers()
+            .get(header::UPGRADE)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v.eq_ignore_ascii_case("websocket"));
+
+        let content_len = req
+            .headers()
+            .get(header::CONTENT_LENGTH)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<usize>().ok());
+        let bufferable = req.method() != http::Method::CONNECT
+            && matches!(content_len, Some(n) if n <= BODY_INSPECT_CAP);
+
+        if !bufferable {
+            return (
+                req,
+                RequestSignals {
+                    len: content_len.unwrap_or(0),
+                    is_websocket_upgrade,
+                    ..RequestSignals::uninspected()
+                },
+            );
+        }
+
+        let (parts, body) = req.into_parts();
+        match body.collect().await {
+            Ok(collected) => {
+                let bytes = collected.to_bytes();
+                let contains_known_secret = std::str::from_utf8(&bytes)
+                    .map(|s| self.broker.body_leaks_secret(s))
+                    .unwrap_or(false); // non-UTF-8 body: skip the textual scan
+                let signals = RequestSignals {
+                    inspected: true,
+                    len: bytes.len(),
+                    contains_known_secret,
+                    is_websocket_upgrade,
+                };
+                (Request::from_parts(parts, Body::from(bytes)), signals)
+            }
+            // Could not read the body: forward without it and let the policy decide
+            // with inspected = false (it will, at worst, fall to the restrictive default).
+            Err(_) => (
+                Request::from_parts(parts, Body::empty()),
+                RequestSignals {
+                    is_websocket_upgrade,
+                    ..RequestSignals::uninspected()
+                },
+            ),
+        }
+    }
+
     /// The whole decision, independent of hudsucker's (non-constructible) context,
     /// so it is unit-testable: normalize → evaluate → audit → forward-or-block.
-    fn mediate_request(&self, mut req: Request<Body>) -> RequestOrResponse {
+    fn mediate_request(
+        &self,
+        mut req: Request<Body>,
+        signals: &RequestSignals,
+    ) -> RequestOrResponse {
         // A CONNECT asks for a tunnel to a host; the decrypted requests *inside* it
         // are mediated separately when hudsucker re-invokes us. We still police the
         // CONNECT **authority** itself, so an un-allowed host gets no tunnel at all
@@ -68,6 +164,22 @@ impl GuardianHandler {
         let summary = summarize(&req);
         let mut action = to_action(&summary);
         action.context.timestamp_ms = now_ms();
+        // Expose what inspection found to the policy (under `action.context.extra`),
+        // so rules can deny e.g. an outbound body that carries one of the user's
+        // secrets, or a WebSocket upgrade.
+        let extra = &mut action.context.extra;
+        extra.insert("body_inspected".into(), signals.inspected.into());
+        extra.insert(
+            "body_len".into(),
+            serde_json::Value::from(signals.len as u64),
+        );
+        extra.insert(
+            "body_contains_known_secret".into(),
+            signals.contains_known_secret.into(),
+        );
+        if signals.is_websocket_upgrade {
+            extra.insert("upgrade".into(), "websocket".into());
+        }
         let outcome = self.policy.evaluate(&action, &self.env);
 
         // Record every decision before acting on it (invariant 7). This is the
@@ -125,7 +237,8 @@ impl HttpHandler for GuardianHandler {
         _ctx: &HttpContext,
         req: Request<Body>,
     ) -> RequestOrResponse {
-        self.mediate_request(req)
+        let (req, signals) = self.inspect(req).await;
+        self.mediate_request(req, &signals)
     }
 }
 
@@ -202,6 +315,8 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
+    const TOKEN: &str = "s3cret-token-abcdef"; // >= 8 bytes so exfil detection fires
+
     const POLICY: &str = r#"
 version = 1
 role = "web-bank"
@@ -220,6 +335,16 @@ explain = "Money movement on the bank is blocked."
 id = "allow-connect-bank"
 when = 'action.args.method == "CONNECT" && action.context.host == "bank.local"'
 decision = "allow"
+[[rules]]
+id = "deny-exfiltration"
+when = 'action.context.extra.body_contains_known_secret == true'
+decision = "deny"
+explain = "Outbound request carries one of your stored credentials."
+[[rules]]
+id = "deny-websocket"
+when = 'action.context.extra.upgrade == "websocket"'
+decision = "deny"
+explain = "WebSocket upgrades are not allowed by this policy."
 "#;
 
     fn handler() -> GuardianHandler {
@@ -230,7 +355,7 @@ decision = "allow"
         };
         let broker = Broker::new(HashMap::from([(
             "bank.local".to_string(),
-            "s3cret".to_string(),
+            TOKEN.to_string(),
         )]));
         let audit = AuditLog::open_in_memory().unwrap();
         GuardianHandler::new(
@@ -249,17 +374,22 @@ decision = "allow"
             .unwrap()
     }
 
+    /// Default "nothing inspected" signals for the synchronous decision tests.
+    fn sig() -> RequestSignals {
+        RequestSignals::uninspected()
+    }
+
     #[test]
     fn allowed_request_is_forwarded_with_brokered_authorization_and_audited() {
         let h = handler();
-        let out = h.mediate_request(request("GET", "http://bank.local/balance"));
+        let out = h.mediate_request(request("GET", "http://bank.local/balance"), &sig());
         match out {
             RequestOrResponse::Request(req) => {
                 let auth = req
                     .headers()
                     .get(header::AUTHORIZATION)
                     .and_then(|v| v.to_str().ok());
-                assert_eq!(auth, Some("Bearer s3cret"));
+                assert_eq!(auth, Some(format!("Bearer {TOKEN}").as_str()));
             }
             RequestOrResponse::Response(_) => panic!("expected forward, got block"),
         }
@@ -270,7 +400,7 @@ decision = "allow"
     #[test]
     fn blocked_request_becomes_a_403_and_is_audited() {
         let h = handler();
-        let out = h.mediate_request(request("POST", "http://bank.local/transfer"));
+        let out = h.mediate_request(request("POST", "http://bank.local/transfer"), &sig());
         match out {
             RequestOrResponse::Response(resp) => {
                 assert_eq!(resp.status(), StatusCode::FORBIDDEN);
@@ -287,7 +417,7 @@ decision = "allow"
         // requests are mediated separately), but the broker credential must NOT be
         // attached to the tunnel-setup. The CONNECT is still a recorded decision.
         let h = handler();
-        match h.mediate_request(request("CONNECT", "bank.local:443")) {
+        match h.mediate_request(request("CONNECT", "bank.local:443"), &sig()) {
             RequestOrResponse::Request(req) => {
                 assert!(!req.headers().contains_key(header::AUTHORIZATION));
             }
@@ -301,7 +431,7 @@ decision = "allow"
         // Default-deny egress: a host with no allow rule gets no tunnel at all, so a
         // non-HTTP protocol can't be smuggled through an un-mediated CONNECT.
         let h = handler();
-        match h.mediate_request(request("CONNECT", "evil.host:443")) {
+        match h.mediate_request(request("CONNECT", "evil.host:443"), &sig()) {
             RequestOrResponse::Response(resp) => assert_eq!(resp.status(), StatusCode::FORBIDDEN),
             RequestOrResponse::Request(_) => panic!("CONNECT to unlisted host must be blocked"),
         }
@@ -310,7 +440,7 @@ decision = "allow"
     #[test]
     fn allowed_request_to_unbrokered_host_has_no_authorization() {
         let h = handler();
-        let out = h.mediate_request(request("GET", "http://example.com/page"));
+        let out = h.mediate_request(request("GET", "http://example.com/page"), &sig());
         match out {
             RequestOrResponse::Request(req) => {
                 assert!(!req.headers().contains_key(header::AUTHORIZATION));
@@ -329,15 +459,70 @@ decision = "allow"
             header::AUTHORIZATION,
             HeaderValue::from_static("Bearer attacker"),
         );
-        match h.mediate_request(req) {
+        match h.mediate_request(req, &sig()) {
             RequestOrResponse::Request(req) => {
                 let auth = req
                     .headers()
                     .get(header::AUTHORIZATION)
                     .and_then(|v| v.to_str().ok());
-                assert_eq!(auth, Some("Bearer s3cret"));
+                assert_eq!(auth, Some(format!("Bearer {TOKEN}").as_str()));
             }
             RequestOrResponse::Response(_) => panic!("expected forward"),
         }
+    }
+
+    #[test]
+    fn outbound_body_carrying_a_known_secret_is_blocked_as_exfiltration() {
+        // Even an otherwise-allowed request (GET) is blocked when the body is found
+        // to carry one of the user's stored credentials — most-restrictive wins.
+        let h = handler();
+        let signals = RequestSignals {
+            inspected: true,
+            len: 32,
+            contains_known_secret: true,
+            is_websocket_upgrade: false,
+        };
+        match h.mediate_request(request("GET", "http://example.com/collect"), &signals) {
+            RequestOrResponse::Response(resp) => assert_eq!(resp.status(), StatusCode::FORBIDDEN),
+            RequestOrResponse::Request(_) => panic!("exfiltration must be blocked"),
+        }
+    }
+
+    #[test]
+    fn websocket_upgrade_is_blocked_when_policy_denies_it() {
+        let h = handler();
+        let signals = RequestSignals {
+            is_websocket_upgrade: true,
+            ..RequestSignals::uninspected()
+        };
+        match h.mediate_request(request("GET", "http://example.com/ws"), &signals) {
+            RequestOrResponse::Response(resp) => assert_eq!(resp.status(), StatusCode::FORBIDDEN),
+            RequestOrResponse::Request(_) => panic!("WebSocket upgrade must be blocked"),
+        }
+    }
+
+    #[tokio::test]
+    async fn inspect_detects_a_known_secret_in_the_request_body() {
+        let h = handler();
+        let body = format!("note=hello&leak={TOKEN}");
+        let req = Request::builder()
+            .method("POST")
+            .uri("http://example.com/collect")
+            .header(header::CONTENT_LENGTH, body.len())
+            .body(Body::from(body))
+            .unwrap();
+        let (_req, signals) = h.inspect(req).await;
+        assert!(signals.inspected);
+        assert!(signals.contains_known_secret);
+    }
+
+    #[tokio::test]
+    async fn inspect_skips_bodies_without_a_content_length() {
+        let h = handler();
+        // No Content-Length → not buffered, reported as not inspected.
+        let req = request("POST", "http://example.com/x");
+        let (_req, signals) = h.inspect(req).await;
+        assert!(!signals.inspected);
+        assert!(!signals.contains_known_secret);
     }
 }

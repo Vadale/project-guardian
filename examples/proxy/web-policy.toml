@@ -39,3 +39,20 @@ id = "deny-state-changing-requests"
 when = '''action.args.method in ["POST", "PUT", "PATCH", "DELETE"]'''
 decision = "deny"
 explain = "Guardian permits reading this site but blocks any state-changing request (transfers, payments, writes)."
+
+# 4) Block any outbound request whose body carries one of YOUR stored credentials
+#    (the proxy scans the body up to a size cap). Stops the agent — or a prompt
+#    injection — from exfiltrating a token you gave Guardian to hold.
+[[rules]]
+id = "deny-credential-exfiltration"
+when = 'action.context.extra.body_contains_known_secret == true'
+decision = "deny"
+explain = "Outbound request carries one of your stored credentials; blocked as exfiltration."
+
+# 5) Block WebSocket upgrades: frame content is not yet inspected, so an open WS
+#    would be an unmediated channel. Remove this only for hosts that need it.
+[[rules]]
+id = "deny-websocket-upgrades"
+when = 'action.context.extra.upgrade == "websocket"'
+decision = "deny"
+explain = "WebSocket upgrades are not allowed (frame content is not yet inspected)."
