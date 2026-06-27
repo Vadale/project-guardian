@@ -5,10 +5,20 @@ action an agent takes (tool calls, shell, web) against a **deterministic policy*
 injects credentials the agent never sees, and records every decision to a
 **tamper-evident audit log**.
 
-## Build
+## Install
+
+No signing certificates are needed — Guardian ships unsigned (see
+[packaging.md](./packaging.md)).
 
 ```sh
-cargo build --release          # the `guardian` binary lands in target/release/
+# From source (needs the Rust toolchain; no OS warning — it's a local build):
+cargo install --git https://github.com/Vadale/project-guardian guardian-cli
+#   …or, in a clone:  cargo build --release   (binary at target/release/guardian)
+
+# Or download a prebuilt binary from GitHub Releases. It's unsigned, so once:
+#   macOS:   right-click → Open  (or Settings → Privacy & Security → Open Anyway)
+#   Windows: SmartScreen → More info → Run anyway
+#   Linux:   chmod +x guardian
 ```
 
 (One-time, for HTTPS interception you'll later trust a local CA — see below.)

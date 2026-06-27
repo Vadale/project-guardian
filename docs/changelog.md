@@ -13,10 +13,11 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
   macOS (aarch64 + x86_64), Linux (x86_64), and Windows (x86_64) and attaches the
   archives to the Release (unsigned developer builds). The **Tauri bundler** is
   enabled (`ui/src-tauri/tauri.conf.json` → `bundle.active`, `targets: all`,
-  metadata). `docs/packaging.md` documents building and the signing/notarization
-  procedure. **Signed/notarized artifacts are blocked on the maintainer providing
-  the Apple Developer ID + Windows code-signing certificates** (as CI secrets) — the
-  signing commands are ready to wire in.
+  metadata). `docs/packaging.md` documents distribution. **Releasing needs no
+  certificates** — unsigned binaries via GitHub Releases + `cargo install` are the
+  supported path (users click through a one-time OS warning). Code signing /
+  notarization is an **optional** later polish that removes that warning (needs paid
+  Apple/Windows certs as CI secrets; commands documented and ready to wire in).
 - **Docs finalized (Phase 4 / §9.4)** — `docs/user-guide.md` (end-to-end getting
   started for the three integration modes + the flagship use case), and
   `docs/policy-authoring.md` (a practical how-to + patterns, complementing the formal
