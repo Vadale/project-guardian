@@ -514,11 +514,17 @@ tamper-evident log — **with no LLM in the deny path**.
       **Remaining:** scoped **OAuth** (`oauth2`) and **macaroons** (`macaroon`) with
       caveats (expiry, max amount, allowed hosts, source binding); hardware-backed
       keys (`security-framework`/`tss-esapi`); in-memory secret zeroize.
-- [ ] 8.2 Constrained adaptive learning: suggest green/yellow adjustments for
+- [~] 8.2 Constrained adaptive learning: suggest green/yellow adjustments for
       low-risk actions, context-bound and decaying; **never** auto-downgrade
       critical categories. Surfaces as suggestions in the report, never silent.
-- [ ] 8.3 Periodic report (the "safety service report"): batch low-risk
-      auto-approvals, blocked threats, and rule suggestions to confirm.
+      **Done:** `guardian-audit::report` suggests relaxing a non-critical rule that
+      was asked ≥3× and approved every time, over a recent window (decaying),
+      grouped per rule (context-bound), **advisory only** (never applied) and
+      **never for a `critical` entry**. **Remaining:** richer context features and a
+      one-click "apply suggestion" in the UI.
+- [x] 8.3 Periodic report (the "safety service report"): batch low-risk
+      auto-approvals, blocked threats, and rule suggestions to confirm. **Done**
+      (`guardian report [--window]` over the audit log).
 - [~] 8.4 Signed community policy packs + trust pipeline: ed25519-signed packs,
       review/reputation, and a hard rule that packs cannot widen critical-category
       permissions without explicit user opt-in. **Done:** `guardian-policy::pack`

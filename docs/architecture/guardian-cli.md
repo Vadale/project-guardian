@@ -53,6 +53,11 @@ front-end over the other crates — no policy logic of its own.
   `--key-file`, `0600`). `verify` refuses unsigned/tampered/added-file/wrong-publisher
   packs (non-zero exit), reports critical-widening rules, and with `--audit` records
   the pack's provenance. Backed by `guardian-policy::pack`.
+- **`report [--audit] [--window N]`** — the safety report (Phase 3 / §8.3): over a
+  recent window of the audit log, prints allow/ask/deny counts, the top blocked
+  rules, and **advisory suggestions** (§8.2) — a non-critical rule you keep approving
+  may be worth allowing. Never edits the policy; never suggests a critical rule.
+  Backed by `guardian-audit::report`.
 - **`broker {set,has,delete} <target>`** — manage broker secrets in the **OS
   keychain** (Phase 3). `set` reads the secret from **stdin** (keeps it out of shell
   history); `has` prints only `present`/`absent` (never the value); `delete` removes

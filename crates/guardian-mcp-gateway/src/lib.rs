@@ -220,6 +220,7 @@ impl Gateway {
                 Some("self-protection".to_string()),
                 None,
                 None,
+                false,
             );
             return GatewayOutcome::Blocked(reason);
         }
@@ -246,6 +247,7 @@ impl Gateway {
             outcome.matched_rule.clone(),
             explanation.as_ref(),
             user_response,
+            outcome.critical,
         );
 
         if proceed {
@@ -276,6 +278,7 @@ impl Gateway {
             .unwrap_or(0)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn record(
         &self,
         action: &Action,
@@ -283,6 +286,7 @@ impl Gateway {
         matched_rule: Option<String>,
         explanation: Option<&Explanation>,
         user_response: Option<String>,
+        critical: bool,
     ) {
         let entry = AuditEntry::for_decision(
             action,
@@ -290,6 +294,7 @@ impl Gateway {
             matched_rule,
             explanation.map(|e| e.rationale.clone()),
             user_response,
+            critical,
         );
         // The request path must not panic if the log is briefly unavailable.
         if let Ok(mut log) = self.audit.lock() {

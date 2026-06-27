@@ -8,6 +8,19 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 ## [Unreleased] — design phase
 
 ### Implemented — 2026-06-27 (Phase 3 — Identity)
+- **Safety report + constrained adaptive suggestions (`guardian-audit::report` +
+  `guardian report`, Phase 3 / §8.3 + §8.2)** — `guardian report [--window N]`
+  summarizes a recent window of the audit log: allow/ask/deny counts, the **top
+  blocked** rules ("threats blocked"), and **suggestions to confirm** — a non-critical
+  rule you were asked about and **approved every time** (≥3×) is surfaced as
+  "consider an allow rule." Suggestions are **advisory only**: Guardian never edits
+  the policy, and a rule that ever touched a **critical category is never suggested**
+  for loosening (invariant 4). To support that guard, `AuditEntry` now records a
+  `critical` flag (threaded through `for_decision` and every recorder: gateway,
+  proxy, exec; serde-default so older logs still parse). Pure, order-independent
+  analysis in `guardian-audit::report` with 5 unit tests (counts/ranking,
+  approved-non-critical → suggested, critical → never, sometimes-denied → not,
+  below-threshold → not). Verified e2e.
 - **Signed community policy packs (`guardian-policy::pack` + `guardian pack`, Phase 3
   / §8.4)** — a **pack** is a directory of policy `.toml` plus `guardian-pack.json`:
   a manifest listing each file's **blake3** hash, signed with **ed25519** by the

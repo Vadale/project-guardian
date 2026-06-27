@@ -141,6 +141,18 @@ enum Command {
         #[command(subcommand)]
         action: PackAction,
     },
+    /// Summarize recent activity from the audit log (Phase 3 / §8.3): allow/ask/deny
+    /// counts, the top blocked rules, and **suggestions** to confirm (§8.2) — a
+    /// non-critical rule you keep approving may be worth allowing. Suggestions are
+    /// advisory only; Guardian never edits the policy.
+    Report {
+        /// Audit-log file (default: `$GUARDIAN_AUDIT`, else `~/.guardian/audit.db`).
+        #[arg(long)]
+        audit: Option<PathBuf>,
+        /// How many of the most recent entries to analyze (the decaying window).
+        #[arg(long, default_value_t = 500)]
+        window: usize,
+    },
     /// Decide an `exec`-class command against the policy and, if allowed, run it —
     /// **sandboxed** (no network, read-only FS) when the matched rule sets
     /// `sandbox = true` (ROADMAP §7.3). Usage: `guardian exec [opts] -- <cmd> [args…]`.
@@ -255,6 +267,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Broker { action } => run_broker(action),
         Command::Pack { action } => run_pack(action),
+        Command::Report { audit, window } => run_report(audit, window),
         Command::Exec {
             policy,
             audit,
@@ -306,6 +319,7 @@ fn run_exec(
                 outcome.matched_rule.clone(),
                 None,
                 None,
+                outcome.critical,
             );
             if log.append(&entry).is_err() {
                 eprintln!("guardian: warning: could not write the audit entry for this exec");
@@ -661,6 +675,7 @@ fn record_pack_provenance(
         Some("pack-verified".to_string()),
         None,
         None,
+        false,
     );
     log.append(&entry)?;
     Ok(())
@@ -673,6 +688,50 @@ fn write_private_file(path: &std::path::Path, contents: &str) -> std::io::Result
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
+}
+
+/// Summarize recent audit activity and surface (advisory) rule suggestions. Read
+/// only — never edits the policy or the log.
+fn run_report(audit: Option<PathBuf>, window: usize) -> anyhow::Result<()> {
+    let path = audit
+        .or_else(|| std::env::var_os("GUARDIAN_AUDIT").map(PathBuf::from))
+        .unwrap_or_else(|| guardian_daemon::config::guardian_dir().join("audit.db"));
+    if !path.exists() {
+        println!("No audit log at {} yet.", path.display());
+        return Ok(());
+    }
+    let log = AuditLog::open(&path)?;
+    let entries: Vec<_> = log.tail(window)?.into_iter().map(|(_, e)| e).collect();
+    let report = guardian_audit::report::build_report(&entries);
+
+    println!(
+        "Guardian report — last {} decision(s) of {}",
+        report.total,
+        path.display()
+    );
+    println!(
+        "  allow {}   ask {}   deny {}",
+        report.allows, report.asks, report.denies
+    );
+
+    if !report.blocked.is_empty() {
+        println!("\nTop blocked:");
+        for b in &report.blocked {
+            println!("  {:>4}x  {}", b.count, cell(&b.label, 60));
+        }
+    }
+
+    if report.suggestions.is_empty() {
+        println!(
+            "\nNo suggestions — nothing safe to relax. (Critical categories are never suggested.)"
+        );
+    } else {
+        println!("\nSuggestions to confirm (advisory — Guardian never edits your policy):");
+        for s in &report.suggestions {
+            println!("  - {}", cell(&s.text, 110));
+        }
     }
     Ok(())
 }

@@ -39,3 +39,15 @@ Each row stores the serialized `content`, a `prev_hash`, and
 ## Tests
 Clean chain and empty log verify; content mutation, tail truncation, and middle
 deletion are each detected; `for_decision` records and chains correctly.
+
+## Report & adaptive suggestions (`report` module, §8.3 + §8.2)
+`report::build_report(&[AuditEntry]) -> Report` is pure, order-independent analysis
+over a **recent window** of entries (the caller passes the window — that's the
+"decaying" part). It returns allow/ask/deny counts, the **top blocked** rules, and
+**suggestions**: a rule (grouped by `matched_rule`, else action kind — context-bound)
+that was asked ≥3× and **approved every time** is surfaced as "consider allowing".
+
+Suggestions are **advisory only** — Guardian never edits the policy — and a group is
+**never suggested** if any of its entries was `critical` (invariant 4: critical
+categories — money / credential / exfiltration / deletion — are never auto-downgraded).
+This is why `AuditEntry` carries a `critical` flag. The CLI `guardian report` renders it.
