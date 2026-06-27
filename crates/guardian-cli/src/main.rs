@@ -81,6 +81,15 @@ enum Command {
         #[arg(long)]
         policy: Option<PathBuf>,
     },
+    /// Browse the tamper-evident audit log: recent decisions + integrity status.
+    Log {
+        /// Audit-log file (default: `$GUARDIAN_AUDIT`, else `~/.guardian/audit.db`).
+        #[arg(long)]
+        audit: Option<PathBuf>,
+        /// How many of the most recent entries to show.
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+    },
 }
 
 #[tokio::main]
@@ -106,6 +115,64 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Decide { policy } => run_decide(policy),
         Command::Hook { policy } => run_claude_hook(policy),
+        Command::Log { audit, limit } => run_log(audit, limit),
+    }
+}
+
+/// Browse the tamper-evident audit log: print recent decisions and the integrity
+/// status. Read-only — never modifies the log.
+fn run_log(audit: Option<PathBuf>, limit: usize) -> anyhow::Result<()> {
+    let path = audit
+        .or_else(|| std::env::var_os("GUARDIAN_AUDIT").map(PathBuf::from))
+        .unwrap_or_else(|| guardian_daemon::config::guardian_dir().join("audit.db"));
+    if !path.exists() {
+        println!("No audit log at {} yet.", path.display());
+        return Ok(());
+    }
+    let log = AuditLog::open(&path)?;
+    let total = log.len()?;
+    let intact = log.verify().is_ok();
+    println!(
+        "Audit log: {}  ({total} entries)  integrity: {}",
+        path.display(),
+        if intact { "OK" } else { "TAMPERED" }
+    );
+    if total == 0 {
+        return Ok(());
+    }
+    println!(
+        "{:>5}  {:<6}  {:<11}  {:<22}  reason",
+        "seq", "decn", "kind", "rule"
+    );
+    for (seq, e) in log.tail(limit)? {
+        let rule = cell(e.matched_rule.as_deref().unwrap_or("-"), 22);
+        let reason_raw = e
+            .decision_reason
+            .as_deref()
+            .or(e.checker_rationale.as_deref())
+            .unwrap_or("-");
+        let reason = cell(reason_raw, 60);
+        println!(
+            "{seq:>5}  {:<6}  {:<11}  {rule:<22}  {reason}",
+            e.decision.to_uppercase(),
+            e.action_kind,
+        );
+    }
+    Ok(())
+}
+
+/// One table cell: collapse control chars to spaces and clip to `max` (so a
+/// multi-line or very long reason can't wreck the one-row-per-entry layout).
+fn cell(s: &str, max: usize) -> String {
+    let flat: String = s
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    if flat.chars().count() > max {
+        let kept: String = flat.chars().take(max.saturating_sub(1)).collect();
+        format!("{kept}…")
+    } else {
+        flat
     }
 }
 

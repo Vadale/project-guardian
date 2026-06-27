@@ -154,6 +154,37 @@ impl AuditLog {
         Ok(self.len()? == 0)
     }
 
+    /// The most recent `limit` entries with their sequence numbers, **oldest-first**
+    /// (for chronological display). For browsing the log (e.g. `guardian log`).
+    pub fn tail(&self, limit: usize) -> Result<Vec<(u64, AuditEntry)>, AuditError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT seq, content FROM audit_log ORDER BY seq DESC LIMIT ?1")?;
+        let rows = stmt.query_map([limit as i64], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (seq, content) = row?;
+            // Resilient: a single unparseable row (the case you reach for `tail`
+            // precisely *when* the log looks corrupt) must not blank the listing —
+            // render a placeholder. `verify()` is the authority on tampering.
+            let entry = serde_json::from_str(&content).unwrap_or_else(|_| AuditEntry {
+                timestamp_ms: 0,
+                action_id: String::new(),
+                action_kind: "<unreadable>".to_string(),
+                decision: "?".to_string(),
+                decision_reason: Some("row content is not valid JSON".to_string()),
+                matched_rule: None,
+                checker_rationale: None,
+                user_response: None,
+            });
+            out.push((seq as u64, entry));
+        }
+        out.reverse(); // most-recent-first from SQL → oldest-first for display
+        Ok(out)
+    }
+
     /// Walk the chain and confirm it is intact. Returns
     /// [`AuditError::Tampered`] on the first inconsistency (broken link,
     /// content edit, sequence gap/reorder, or tail truncation).
@@ -245,6 +276,38 @@ mod tests {
         log.append(&entry("c", "deny")).unwrap();
         assert_eq!(log.len().unwrap(), 3);
         assert!(log.verify().is_ok());
+    }
+
+    #[test]
+    fn tail_returns_recent_entries_oldest_first() {
+        let mut log = AuditLog::open_in_memory().unwrap();
+        log.append(&entry("a", "allow")).unwrap();
+        log.append(&entry("b", "ask")).unwrap();
+        log.append(&entry("c", "deny")).unwrap();
+        let t = log.tail(2).unwrap();
+        assert_eq!(t.len(), 2);
+        assert_eq!((t[0].0, t[0].1.action_id.as_str()), (2, "b")); // oldest of the tail
+        assert_eq!((t[1].0, t[1].1.action_id.as_str()), (3, "c"));
+        // Asking for more than exist returns all, oldest-first.
+        assert_eq!(log.tail(10).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn tail_is_resilient_to_an_unparseable_row() {
+        let mut log = AuditLog::open_in_memory().unwrap();
+        log.append(&entry("a", "allow")).unwrap();
+        log.append(&entry("b", "deny")).unwrap();
+        // Corrupt one row's content (private field reachable from the child test mod).
+        log.conn
+            .execute(
+                "UPDATE audit_log SET content = 'not json' WHERE seq = 1",
+                [],
+            )
+            .unwrap();
+        let t = log.tail(10).unwrap(); // does NOT error — degrades to a placeholder
+        assert_eq!(t.len(), 2);
+        assert_eq!(t[0].1.action_kind, "<unreadable>");
+        assert_eq!(t[1].1.action_id, "b");
     }
 
     #[test]

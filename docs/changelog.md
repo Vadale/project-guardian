@@ -8,6 +8,17 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 ## [Unreleased] — design phase
 
 ### Implemented — 2026-06-27
+- **Audit-log browser (`guardian log`)** — a read-only viewer for the tamper-evident
+  log (the "black box"): `guardian log [--audit <path>] [--limit N]` opens the
+  persistent log (`$GUARDIAN_AUDIT`, else `~/.guardian/audit.db`), prints the
+  **integrity status** (`verify()` → OK/TAMPERED), the entry count, and a table of
+  recent decisions (seq, decision, kind, matched rule, reason). Backed by a new
+  `AuditLog::tail(limit)` (most-recent-first from SQL, returned oldest-first). It is
+  **resilient when the log looks corrupt** — an unparseable row renders as
+  `<unreadable>` rather than aborting the listing (you reach for this precisely when
+  the log is suspect; `verify()` remains the authority). Cells collapse control
+  chars and clip, so a multi-line reason can't break the table. Read-only; reviewed
+  by code-reviewer; tests for `tail` ordering/over-limit and the corrupt-row path.
 - **Token broker (vertical seed)** (ROADMAP §8.1) — `guardian-broker::Broker` holds
   `target → token` secrets so the **agent never sees the raw credential**: Guardian
   injects the token into a tool-call only on the **forward (post-allow) path**, so
