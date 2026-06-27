@@ -1,11 +1,16 @@
 # Project Guardian — An AI Guardian Firewall for Autonomous Agents
 
-> **Status:** working MVP (a vertical slice), not yet 1.0. Rust workspace, 62
-> tests green. Implemented: the deterministic policy engine, the tamper-evident
-> audit log, the advisory Checker, the MCP gateway + stdio transport, the daemon +
-> control socket, the terminal approval cockpit (TUI), and an AgentDojo evaluation
-> harness. Next: network proxy, OS sandbox, token broker, adaptive learning,
-> signed policy packs, and the desktop GUI — see [`ROADMAP.md`](ROADMAP.md).
+> **Status:** working product, approaching 1.0. Rust workspace, ~164 tests green.
+> Implemented through **Phase 4 (hardening)**: the deterministic policy engine, the
+> tamper-evident audit log (optionally **sealed-key signed**), the advisory Checker,
+> the MCP gateway + stdio transport, the daemon + control socket, the terminal
+> approval cockpit (TUI), the AgentDojo eval harness, the **network proxy with TLS
+> interception** (broker-injected credentials, exfiltration inspection, default-deny
+> egress, cockpit `ask`-routing), the **OS exec sandbox**, the **token broker** (OS
+> keychain + least-privilege caveats), **lightweight verifiable credentials**,
+> **adaptive suggestions + safety report**, and **ed25519-signed community policy
+> packs**. Getting started: [`docs/user-guide.md`](docs/user-guide.md). Remaining for
+> 1.0: signed/notarized **packaging** and the desktop GUI — see [`ROADMAP.md`](ROADMAP.md).
 >
 > **License:** [Apache-2.0](LICENSE) · **Governance:** [CONTRIBUTING](CONTRIBUTING.md) ·
 > [SECURITY](SECURITY.md) · [CODE_OF_CONDUCT](CODE_OF_CONDUCT.md) · [ADRs](docs/adr/)
