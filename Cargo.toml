@@ -22,13 +22,22 @@ serde_json = "1"
 thiserror = "1"
 anyhow = "1"
 toml = "0.8"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # HTTP client for the advisory Checker. http-only (no TLS) to avoid the ring/openssl
 # license surface; a local model endpoint (e.g. http://localhost:11434) is http.
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
 wiremock = "0.6"
+
+# Network proxy (Phase 2, guardian-proxy): user-space HTTP(S) MITM forward proxy.
+# hudsucker brings hyper 1 + tokio-rustls; rcgen generates the local CA. These pull
+# the ring/rustls TLS surface (handled in deny.toml with a reviewed allowance).
+hudsucker = "0.24"
+rcgen = { version = "0.14", features = ["x509-parser"] }
+http = "1"
+hyper = "1"
+bytes = "1"
 
 # Internal crates (path deps), referenced by dependents via `{ workspace = true }`.
 guardian-core = { path = "crates/guardian-core" }
@@ -38,3 +47,4 @@ guardian-checker = { path = "crates/guardian-checker" }
 guardian-mcp-gateway = { path = "crates/guardian-mcp-gateway" }
 guardian-broker = { path = "crates/guardian-broker" }
 guardian-daemon = { path = "crates/guardian-daemon" }
+guardian-proxy = { path = "crates/guardian-proxy" }

@@ -90,6 +90,31 @@ enum Command {
         #[arg(long, default_value_t = 20)]
         limit: usize,
     },
+    /// Run the user-space HTTP(S) forward proxy (Phase 2): mediates the agent's web
+    /// traffic with the same policy + token broker. Point the agent's
+    /// `HTTP_PROXY`/`HTTPS_PROXY` at the listen address; for HTTPS, install the
+    /// local CA (`guardian proxy --print-ca-path` shows where it lives).
+    Proxy {
+        /// Address to listen on (default 127.0.0.1:8080).
+        #[arg(long, default_value = "127.0.0.1:8080")]
+        listen: String,
+        /// Policy file (defaults to the built-in demo policy).
+        #[arg(long)]
+        policy: Option<PathBuf>,
+        /// Token-broker secrets file (`target = "token"`); the proxy attaches the
+        /// credential as `Authorization` only on an allowed request.
+        #[arg(long)]
+        secrets: Option<PathBuf>,
+        /// Audit-log file (default: `$GUARDIAN_AUDIT`, else `~/.guardian/audit.db`).
+        #[arg(long)]
+        audit: Option<PathBuf>,
+        /// Directory holding the local CA (default: `<guardian-dir>/proxy-ca`).
+        #[arg(long)]
+        ca_dir: Option<PathBuf>,
+        /// Print the CA certificate path (to install/trust) and exit.
+        #[arg(long)]
+        print_ca_path: bool,
+    },
 }
 
 #[tokio::main]
@@ -116,7 +141,84 @@ async fn main() -> anyhow::Result<()> {
         Command::Decide { policy } => run_decide(policy),
         Command::Hook { policy } => run_claude_hook(policy),
         Command::Log { audit, limit } => run_log(audit, limit),
+        Command::Proxy {
+            listen,
+            policy,
+            secrets,
+            audit,
+            ca_dir,
+            print_ca_path,
+        } => run_proxy(listen, policy, secrets, audit, ca_dir, print_ca_path).await,
     }
+}
+
+/// Run the network proxy: load policy + broker + audit + local CA, then mediate
+/// every request until Ctrl-C.
+async fn run_proxy(
+    listen: String,
+    policy_path: Option<PathBuf>,
+    secrets: Option<PathBuf>,
+    audit: Option<PathBuf>,
+    ca_dir: Option<PathBuf>,
+    print_ca_path: bool,
+) -> anyhow::Result<()> {
+    use guardian_proxy::ca::LocalCa;
+    use std::sync::{Arc, Mutex};
+
+    let ca_dir = ca_dir.unwrap_or_else(|| guardian_daemon::config::guardian_dir().join("proxy-ca"));
+    if print_ca_path {
+        let (cert_path, _) = LocalCa::paths(&ca_dir);
+        // Ensure it exists so the path is real to install.
+        LocalCa::load_or_generate(&ca_dir)?;
+        println!("{}", cert_path.display());
+        return Ok(());
+    }
+
+    let addr: std::net::SocketAddr = listen
+        .parse()
+        .map_err(|e| anyhow::anyhow!("invalid --listen address {listen:?}: {e}"))?;
+
+    let policy = Arc::new(load_policy(&policy_path)?);
+    let env = Arc::new(eval_env());
+
+    let broker = match &secrets {
+        Some(path) => {
+            warn_if_world_readable(path);
+            let src = std::fs::read_to_string(path)?;
+            Arc::new(
+                guardian_broker::Broker::from_toml_str(&src)
+                    .map_err(|e| anyhow::anyhow!("secrets file {}: {e}", path.display()))?,
+            )
+        }
+        None => Arc::new(guardian_broker::Broker::default()),
+    };
+
+    let audit_path = audit
+        .or_else(|| std::env::var_os("GUARDIAN_AUDIT").map(PathBuf::from))
+        .unwrap_or_else(|| guardian_daemon::config::guardian_dir().join("audit.db"));
+    if let Some(parent) = audit_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let audit_log = Arc::new(Mutex::new(AuditLog::open(&audit_path)?));
+
+    let ca = LocalCa::load_or_generate(&ca_dir)?;
+    let (cert_path, _) = LocalCa::paths(&ca_dir);
+    let handler = guardian_proxy::server::GuardianHandler::new(policy, env, broker, audit_log);
+
+    println!("guardian proxy listening on http://{addr}");
+    println!("  audit log : {}", audit_path.display());
+    println!(
+        "  local CA  : {} (install/trust for HTTPS)",
+        cert_path.display()
+    );
+    println!("  point the agent at it: export HTTP_PROXY=http://{addr} HTTPS_PROXY=http://{addr}");
+    println!("  Ctrl-C to stop.");
+
+    let shutdown = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    guardian_proxy::server::run(addr, &ca, handler, shutdown).await?;
+    Ok(())
 }
 
 /// Browse the tamper-evident audit log: print recent decisions and the integrity

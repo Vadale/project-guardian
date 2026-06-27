@@ -1,0 +1,41 @@
+# Example Guardian network-proxy policy.
+#
+# Goal — the flagship use case: let the agent *read* a private site you authorize
+# (e.g. your bank account page, Agenzia delle Entrate), with the access token held
+# by Guardian's broker (the agent never sees it), while **blocking anything that
+# changes state** — a transfer, a payment, a deletion — even under prompt
+# injection or a hallucinating agent.
+#
+# Egress is default-deny: only the hosts and methods named below are permitted;
+# everything else falls to the restrictive default. Replace the example hosts with
+# the real ones. Validate with: `guardian policy-validate examples/proxy/web-policy.toml`.
+
+version = 1
+role = "web-readonly"
+
+[defaults]
+decision = "ask" # default-deny: unlisted hosts/methods are not allowed through
+
+# 1) Allow opening the TLS tunnel ONLY to the hosts you authorize. A host with no
+#    rule here gets no tunnel at all, so nothing can be smuggled out to it.
+[[rules]]
+id = "allow-connect-authorized-hosts"
+when = '''action.args.method == "CONNECT" && action.context.host in ["account.example-bank.test", "www.example-bank.test"]'''
+decision = "allow"
+
+# 2) Allow read-only requests to those hosts. Guardian injects the brokered
+#    Authorization header here (see secrets.example.toml) so the agent never holds
+#    the token.
+[[rules]]
+id = "allow-reads-to-authorized-hosts"
+when = '''(action.args.method == "GET" || action.args.method == "HEAD") && action.context.host in ["account.example-bank.test", "www.example-bank.test"]'''
+decision = "allow"
+
+# 3) Block every state-changing request outright — money movement, writes,
+#    deletions — regardless of host. This is the "go read the balance but never
+#    empty the account" guarantee.
+[[rules]]
+id = "deny-state-changing-requests"
+when = '''action.args.method in ["POST", "PUT", "PATCH", "DELETE"]'''
+decision = "deny"
+explain = "Guardian permits reading this site but blocks any state-changing request (transfers, payments, writes)."

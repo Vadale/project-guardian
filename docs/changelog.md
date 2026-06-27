@@ -8,6 +8,32 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 ## [Unreleased] — design phase
 
 ### Implemented — 2026-06-27
+- **Network proxy — live HTTP(S) forward proxy with TLS interception
+  (`guardian-proxy` + `guardian proxy`, Phase 2 / ROADMAP §7.1, increments 2–3)** —
+  the mediation core now drives **real sockets** via `hudsucker` (+ `rustls`/`rcgen`).
+  `server::GuardianHandler` implements hudsucker's `HttpHandler`: it normalizes each
+  request, evaluates the **deterministic policy**, **records the decision to the
+  tamper-evident audit log before acting** (and **fails closed** if the log is
+  unavailable — this is the egress critical path), then forwards (injecting the
+  broker's `Authorization` on `Allow`, never on `CONNECT`) or returns a `403` with the
+  block reason. `ca::LocalCa` generates/persists/loads a **local CA** (rcgen 0.14)
+  used to mint per-host leaf certs; the CA key is written **owner-only (`0o600`,
+  applied atomically at creation)** and redacted in `Debug`. **Egress is
+  default-deny**: the proxy mediates the `CONNECT` **authority** too, so an
+  un-allowlisted host gets no tunnel at all (closes the raw-protocol-after-CONNECT
+  bypass the security audit flagged) — the decrypted inner requests are still
+  mediated independently. Upstream TLS verification stays strict (webpki roots; real
+  servers are not MITM-downgraded). New `guardian proxy` CLI subcommand
+  (`--listen/--policy/--secrets/--audit/--ca-dir/--print-ca-path`) and an
+  `examples/proxy/` walkthrough (read a private site with a brokered token; block all
+  state-changing requests). Verified end-to-end: plain HTTP forwards with the token
+  injected, `POST` blocked `403`, HTTPS MITM returns `200` when the client trusts the
+  local CA, an un-allowlisted HTTPS host has its tunnel refused, and every decision is
+  audited. Reviewed by `code-reviewer` (approve-with-nits) and `security-auditor`
+  (no Critical/High; the CONNECT-authority gate, fail-closed audit, and atomic CA-key
+  perms were applied from its findings; WebSocket-frame inspection tracked for the
+  body-inspection increment). `deny.toml` allows `CDLA-Permissive-2.0` (the
+  webpki-roots data license); the TLS crypto deps are Apache-2.0/ISC.
 - **Network proxy — mediation core (`guardian-proxy`, Phase 2 / ROADMAP §7.1)** —
   the first increment of the user-space HTTP(S) forward proxy (decision recorded in
   `docs/adr/0004-network-proxy.md`), built transport-first so the heavy TLS stack

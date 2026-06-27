@@ -23,6 +23,12 @@ allow = [
     "Unicode-DFS-2016",
     "Zlib",
     "MPL-2.0",
+    # CDLA-Permissive-2.0: the Mozilla trusted-root CA bundle (`webpki-roots`),
+    # pulled by the network-proxy TLS stack (hyper-rustls / tokio-tungstenite). A
+    # permissive *data* license for the root list — reviewed and accepted. The
+    # TLS crypto deps (ring, aws-lc-sys) are already Apache-2.0/ISC, no exception
+    # needed for them.
+    "CDLA-Permissive-2.0",
 ]
 
 [bans]

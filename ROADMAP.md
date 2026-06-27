@@ -407,9 +407,15 @@ tamper-evident log — **with no LLM in the deny path**.
         broker`: `mediate()` forwards (attaching the broker's `Authorization` only
         on `Allow`) or blocks (`Deny`, and `ask` fails closed); host normalized so
         policy + broker share one key; `Debug` redacts the token. Fully unit-tested.
-  - [ ] Live forward proxy (plain HTTP) + audit recording.
-  - [ ] TLS MITM (rustls + rcgen local CA).
-  - [ ] Cockpit `ask` routing + body exfiltration inspection.
+  - [x] **Live forward proxy + audit recording** — `server::GuardianHandler`
+        (hudsucker `HttpHandler`); records each decision before acting and **fails
+        closed** if the audit log is unavailable (egress critical path).
+  - [x] **TLS MITM** — `ca::LocalCa` (rcgen 0.14) mints per-host certs; CA key
+        `0o600` (atomic) + redacted `Debug`; `guardian proxy` CLI + `--print-ca-path`.
+        **Egress is default-deny**: the `CONNECT` authority is policed too, so an
+        un-allowlisted host gets no tunnel (closes the raw-protocol bypass).
+  - [ ] CA-trust onboarding **UI** (currently CLI + docs); WebSocket-frame
+        inspection; cockpit `ask` routing + body exfiltration inspection.
 - [ ] 7.2 CA-trust onboarding UX in the UI (install/trust the local CA safely).
 - [ ] 7.3 Sandbox wrapper: run `exec`-class tools inside `sandbox-exec`
       (macOS) / `bubblewrap` (Linux) / AppContainer (Windows) / `docker`.
