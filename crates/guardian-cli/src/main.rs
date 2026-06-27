@@ -118,6 +118,10 @@ enum Command {
         /// Print the CA certificate path (to install/trust) and exit.
         #[arg(long)]
         print_ca_path: bool,
+        /// Install/trust the local CA in this machine's trust store (HTTPS
+        /// onboarding), then exit. Security-sensitive — see the printed warning.
+        #[arg(long)]
+        install_ca: bool,
     },
     /// Decide an `exec`-class command against the policy and, if allowed, run it —
     /// **sandboxed** (no network, read-only FS) when the matched rule sets
@@ -176,6 +180,7 @@ async fn main() -> anyhow::Result<()> {
             ca_dir,
             daemon,
             print_ca_path,
+            install_ca,
         } => {
             run_proxy(
                 listen,
@@ -185,6 +190,7 @@ async fn main() -> anyhow::Result<()> {
                 ca_dir,
                 daemon,
                 print_ca_path,
+                install_ca,
             )
             .await
         }
@@ -299,7 +305,9 @@ fn now_ms_cli() -> i64 {
 }
 
 /// Run the network proxy: load policy + broker + audit + local CA, then mediate
-/// every request until Ctrl-C.
+/// every request until Ctrl-C. (Thin CLI adapter — the args mirror the `Proxy`
+/// clap variant 1:1, so a wrapper struct would only duplicate it.)
+#[allow(clippy::too_many_arguments)]
 async fn run_proxy(
     listen: String,
     policy_path: Option<PathBuf>,
@@ -308,6 +316,7 @@ async fn run_proxy(
     ca_dir: Option<PathBuf>,
     daemon: Option<PathBuf>,
     print_ca_path: bool,
+    install_ca: bool,
 ) -> anyhow::Result<()> {
     use guardian_proxy::ca::LocalCa;
     use std::sync::{Arc, Mutex};
@@ -319,6 +328,11 @@ async fn run_proxy(
         LocalCa::load_or_generate(&ca_dir)?;
         println!("{}", cert_path.display());
         return Ok(());
+    }
+    if install_ca {
+        LocalCa::load_or_generate(&ca_dir)?;
+        let (cert_path, _) = LocalCa::paths(&ca_dir);
+        return install_ca_trust(&cert_path);
     }
 
     let addr: std::net::SocketAddr = listen
@@ -375,6 +389,60 @@ async fn run_proxy(
     };
     guardian_proxy::server::run(addr, &ca, handler, shutdown).await?;
     Ok(())
+}
+
+/// Install/trust the local proxy CA so HTTPS interception works. Installing a CA
+/// is **security-sensitive** — it lets Guardian (and anyone holding the CA key)
+/// present a trusted certificate for any site — so we warn first. On macOS we run
+/// `security add-trusted-cert` (the OS prompts you to authorize); elsewhere we print
+/// the exact command for you to run (it needs your administrator rights).
+fn install_ca_trust(cert_path: &std::path::Path) -> anyhow::Result<()> {
+    eprintln!(
+        "WARNING: trusting this CA lets Guardian intercept ALL your TLS traffic.\n\
+         Install it only for the machine/agent you are guarding, and keep the CA key\n\
+         (next to the cert) private.\n"
+    );
+    println!("{}", ca_trust_instructions(cert_path));
+
+    if cfg!(target_os = "macos") {
+        let keychain = std::env::var("HOME")
+            .map(|h| format!("{h}/Library/Keychains/login.keychain-db"))
+            .unwrap_or_default();
+        println!("\nRunning: security add-trusted-cert -r trustRoot -k <login keychain> <cert>");
+        println!("(macOS will prompt you to authorize this change.)");
+        let status = std::process::Command::new("security")
+            .args(["add-trusted-cert", "-r", "trustRoot", "-k", &keychain])
+            .arg(cert_path)
+            .status();
+        match status {
+            Ok(s) if s.success() => println!("CA trusted in your login keychain."),
+            _ => println!("Could not install automatically — run the command above yourself."),
+        }
+    }
+    Ok(())
+}
+
+/// The platform-specific, copy-pasteable instructions to trust `cert_path`. Pure
+/// (no I/O) so it is unit-testable.
+fn ca_trust_instructions(cert_path: &std::path::Path) -> String {
+    let p = cert_path.display();
+    if cfg!(target_os = "macos") {
+        format!(
+            "To trust the Guardian CA on macOS:\n  \
+             security add-trusted-cert -r trustRoot -k ~/Library/Keychains/login.keychain-db {p}\n  \
+             (or open {p} in Keychain Access and set it to \"Always Trust\").\n  \
+             To remove later: security delete-certificate -c \"Guardian Local CA\"."
+        )
+    } else if cfg!(target_os = "linux") {
+        format!(
+            "To trust the Guardian CA on Linux (Debian/Ubuntu):\n  \
+             sudo cp {p} /usr/local/share/ca-certificates/guardian-local-ca.crt\n  \
+             sudo update-ca-certificates\n  \
+             To remove later: delete that file and re-run update-ca-certificates."
+        )
+    } else {
+        format!("Trust this certificate in your system/client trust store: {p}")
+    }
 }
 
 /// Browse the tamper-evident audit log: print recent decisions and the integrity
@@ -1091,6 +1159,20 @@ explain = "Shell commands are blocked here."
     fn read_is_allowed() {
         let (d, _) = decide(r#"{"tool_name":"Read","tool_input":{"file_path":"/home/u/x.txt"}}"#);
         assert_eq!(d, "allow");
+    }
+
+    #[test]
+    fn ca_trust_instructions_name_the_cert_and_a_real_command() {
+        let s = super::ca_trust_instructions(std::path::Path::new("/tmp/ca.crt"));
+        assert!(s.contains("/tmp/ca.crt"));
+        // Platform-appropriate, actionable command (not an empty placeholder).
+        if cfg!(target_os = "macos") {
+            assert!(s.contains("security add-trusted-cert"));
+        } else if cfg!(target_os = "linux") {
+            assert!(s.contains("update-ca-certificates"));
+        } else {
+            assert!(s.contains("trust"));
+        }
     }
 
     #[test]

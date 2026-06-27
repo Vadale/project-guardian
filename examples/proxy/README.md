@@ -25,8 +25,10 @@ guardian proxy \
   --policy  examples/proxy/web-policy.toml \
   --secrets examples/proxy/secrets.toml
 
-# 3) For HTTPS, install/trust the local CA it prints (one time). Its path:
-guardian proxy --print-ca-path
+# 3) For HTTPS, trust the local CA (one time). This warns you, prints the exact
+#    commands, and on macOS runs the trust command (the OS asks you to authorize):
+guardian proxy --install-ca
+#    (or just print the cert path and install it yourself: guardian proxy --print-ca-path)
 
 # 4) Point the agent at the proxy
 export HTTP_PROXY=http://127.0.0.1:8080 HTTPS_PROXY=http://127.0.0.1:8080
