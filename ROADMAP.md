@@ -398,10 +398,18 @@ tamper-evident log — **with no LLM in the deny path**.
 
 **Goal:** close the raw-exec/network gaps with off-the-shelf containment.
 
-- [ ] 7.1 `guardian-proxy`: HTTP(S) forward proxy (`hudsucker` + `rustls` +
+- [~] 7.1 `guardian-proxy`: HTTP(S) forward proxy (`hudsucker` + `rustls` +
       `rcgen` local CA). Normalizes requests to `Action`s; applies egress
       allowlists; optional agent-signaling header (default OFF, courtesy only);
-      optional content watermark on AI-authored bodies.
+      optional content watermark on AI-authored bodies. Built in increments
+      (see `docs/adr/0004-network-proxy.md`):
+  - [x] **Mediation core** — transport-agnostic `HttpRequest → Action → policy +
+        broker`: `mediate()` forwards (attaching the broker's `Authorization` only
+        on `Allow`) or blocks (`Deny`, and `ask` fails closed); host normalized so
+        policy + broker share one key; `Debug` redacts the token. Fully unit-tested.
+  - [ ] Live forward proxy (plain HTTP) + audit recording.
+  - [ ] TLS MITM (rustls + rcgen local CA).
+  - [ ] Cockpit `ask` routing + body exfiltration inspection.
 - [ ] 7.2 CA-trust onboarding UX in the UI (install/trust the local CA safely).
 - [ ] 7.3 Sandbox wrapper: run `exec`-class tools inside `sandbox-exec`
       (macOS) / `bubblewrap` (Linux) / AppContainer (Windows) / `docker`.

@@ -50,6 +50,12 @@ impl Broker {
         self.secrets.contains_key(target)
     }
 
+    /// The raw token for `target`, if held — e.g. to build an `Authorization`
+    /// header at the network proxy. Callers must not log or expose it to the agent.
+    pub fn token_for(&self, target: &str) -> Option<&str> {
+        self.secrets.get(target).map(String::as_str)
+    }
+
     /// Inject the credential for `target` into `args` under [`DEFAULT_FIELD`], so the
     /// agent never had to supply it. Returns `true` if a token was injected.
     /// `args` is coerced to an object if it is null. Never logs the token.
