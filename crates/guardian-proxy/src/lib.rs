@@ -1,19 +1,28 @@
 //! `guardian-proxy` — the network policy layer for an agent's web traffic.
 //!
-//! Built in increments. **This increment is the transport-agnostic mediation
-//! CORE** (ROADMAP §7.1, step 1): it normalizes an HTTP request into a
-//! [`guardian_core::Action`], asks the deterministic policy whether to forward or
-//! block, and — for an allowed request to a brokered host — supplies the
-//! `Authorization` value from the token broker so the agent never holds the
-//! credential. The TLS-intercepting forward proxy (hudsucker + rustls + rcgen,
-//! with a local CA) plugs this core into real sockets in a later increment
-//! (see `docs/adr/0004-network-proxy.md`).
+//! This module is the **transport-agnostic mediation core** (ROADMAP §7.1): it
+//! normalizes an HTTP request into a [`guardian_core::Action`], asks the
+//! deterministic policy whether to forward or block, and — for an allowed request
+//! to a brokered host — supplies the `Authorization` value from the token broker
+//! so the agent never holds the credential.
+//!
+//! The **live forward proxy** that plugs this core onto real sockets lives in
+//! [`server`] (hudsucker + rustls TLS interception); the **local CA** it uses to
+//! intercept HTTPS lives in [`ca`]. See `docs/adr/0004-network-proxy.md`.
+//!
+//! Known gap (tracked for a later increment): once an allowed `CONNECT` tunnel is
+//! upgraded to a **WebSocket**, individual frames are not inspected — only the
+//! upgrade handshake's host/method/path is policed. An allowed WS host is thus an
+//! unmediated bidirectional channel until body/frame inspection lands.
 
 #![forbid(unsafe_code)]
 
 use guardian_broker::Broker;
 use guardian_core::{Action, ActionContext, ActionId, ActionKind, Decision};
-use guardian_policy::{CompiledPolicy, EvalEnv};
+use guardian_policy::{CompiledPolicy, EvalEnv, EvalOutcome};
+
+pub mod ca;
+pub mod server;
 
 /// The parts of an outbound HTTP request the policy needs to see.
 #[derive(Debug, Clone)]
@@ -96,13 +105,29 @@ pub fn mediate(
     broker: &Broker,
 ) -> ProxyOutcome {
     let action = to_action(req);
-    match policy.evaluate(&action, env).decision {
+    let outcome = policy.evaluate(&action, env);
+    classify(&action, &outcome, broker)
+}
+
+/// Map a policy [`EvalOutcome`] to a [`ProxyOutcome`], attaching the broker
+/// credential for an allowed request to a brokered host. Split out from
+/// [`mediate`] so the live proxy can **record the full outcome** (matched rule,
+/// critical flag) to the audit log before acting on it. The broker key is the
+/// **already-normalized** `action.context.host`, so it can never diverge from the
+/// host the policy matched on. `ask` fails closed (no human at this layer).
+pub fn classify(action: &Action, outcome: &EvalOutcome, broker: &Broker) -> ProxyOutcome {
+    match &outcome.decision {
         Decision::Allow => ProxyOutcome::Forward {
-            authorization: broker
-                .token_for(&normalize_host(&req.host))
+            authorization: action
+                .context
+                .host
+                .as_deref()
+                .and_then(|h| broker.token_for(h))
                 .map(|t| format!("Bearer {t}")),
         },
-        Decision::Deny { reason } => ProxyOutcome::Block { reason },
+        Decision::Deny { reason } => ProxyOutcome::Block {
+            reason: reason.clone(),
+        },
         Decision::Ask { reason } => ProxyOutcome::Block {
             reason: format!("needs approval: {reason}"),
         },

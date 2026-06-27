@@ -6,10 +6,10 @@ not just MCP tool calls. A user-space forward proxy (no kernel hooks, invariant 
 the agent points `HTTP(S)_PROXY` at it. Decision recorded in
 [`docs/adr/0004-network-proxy.md`](../adr/0004-network-proxy.md).
 
-Built in increments so the heavy/risky TLS stack stays isolated. **Today this crate
-is the transport-agnostic mediation core only** — no sockets, no TLS, no network
-deps. The live proxy (hudsucker + rustls + rcgen local CA) plugs this core into real
-sockets in later increments.
+Built in increments so the heavy/risky TLS stack stays isolated. The
+transport-agnostic **mediation core** (`lib.rs`) is now driven onto real sockets by
+the **live forward proxy** (`server.rs`, via hudsucker + rustls), which intercepts
+HTTPS using a **local CA** (`ca.rs`, rcgen). Run it with `guardian proxy`.
 
 ## What it does (mediation core)
 The core reuses the **same deterministic policy engine and token broker** as the MCP
@@ -42,14 +42,41 @@ gateway, so web and MCP traffic are governed consistently.
   prints `<redacted>` for the authorization (mirrors `Broker`'s redacted `Debug`), so
   a stray `{:?}` in a future log line can't leak the credential.
 
+## The live proxy (`server.rs`)
+`GuardianHandler` implements hudsucker's `HttpHandler`. For each request,
+`mediate_request`:
+1. normalizes it to an `Action` and evaluates the deterministic policy;
+2. **records the decision to the audit log before acting** (invariant 7) — and on
+   the network **egress critical path** it **fails closed** (returns a `403`) if the
+   log can't be written, rather than forwarding an unlogged request (invariant 5);
+3. forwards (attaching the broker `Authorization` on `Allow`, for a real request) or
+   returns a `403` carrying the block reason.
+
+**Egress is default-deny.** A `CONNECT` only opens a TLS tunnel, but it is **also
+mediated** (on its authority/host): an un-allowlisted host gets no tunnel at all, so a
+non-HTTP protocol can't be smuggled through an opaque tunnel. The credential is never
+attached to a `CONNECT` — only to the decrypted inner requests, which are mediated
+independently. Upstream TLS verification stays strict (webpki roots; Guardian does not
+MITM-downgrade real servers). `run()` builds and starts the hudsucker proxy with a
+graceful-shutdown future (`guardian proxy` wires it to Ctrl-C).
+
+## The local CA (`ca.rs`)
+`LocalCa` generates/persists/loads a self-signed CA (rcgen 0.14) and builds
+hudsucker's `RcgenAuthority` to mint per-host leaf certs. Intercepting HTTPS requires
+the client to trust this CA — a **security-sensitive, opt-in** step (the CA key can
+mint a cert for any site), so: the key is generated locally, written **owner-only
+(`0o600`, applied atomically at creation)**, redacted in `Debug`, and never leaves the
+machine. `guardian proxy --print-ca-path` shows where `ca.crt` lives to install it.
+
 ## Deferred to later increments (tracked in the ADR)
-- **Audit recording** — the core decides but does no I/O; every forward/block becomes
-  a tamper-evident entry (invariant 7) when the live proxy lands, threading the
-  policy `matched_rule`/`critical` through alongside the decision.
-- **TLS MITM** — rustls + an rcgen-generated local CA, plus opt-in CA-trust UX.
+- **CA-trust onboarding UI** (today it's CLI + docs).
+- **WebSocket-frame inspection** — the WS *upgrade* request's host is policed, but
+  individual frames over an allowed tunnel are not yet inspected.
 - **Cockpit `ask` routing** and **body-content exfiltration inspection**.
 
 ## Dependencies
-`guardian-core`, `guardian-policy`, `guardian-broker`, `serde_json`. No TLS/network
-deps yet (deliberate — keeps the core light and cargo-deny-clean until the transport
-increment). `#![forbid(unsafe_code)]`.
+Core: `guardian-core`, `guardian-policy`, `guardian-broker`, `guardian-audit`,
+`serde_json`. Live proxy: `hudsucker`, `rcgen`, `http`, `hyper`, `bytes`, `tokio`,
+`tracing`, `thiserror`. The TLS stack pulls `ring` + `aws-lc-rs` (Apache-2.0/ISC) and
+`webpki-roots` (`CDLA-Permissive-2.0`, allowed in `deny.toml`). `#![forbid(unsafe_code)]`
+(unsafe lives only in the FFI crypto deps).

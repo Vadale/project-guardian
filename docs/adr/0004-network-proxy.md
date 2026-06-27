@@ -22,16 +22,20 @@ through the **existing deterministic policy engine**; the **token broker** suppl
 credentials as headers so the agent never holds them.
 
 Built in increments to keep the heavy/risky parts isolated:
-1. **Mediation core** *(this increment)* — `HttpRequest → Action → policy + broker`,
-   transport-agnostic and fully unit-tested. **No TLS deps yet.**
-2. **Live forward proxy (plain HTTP)** — hudsucker wiring for `http://`. This is
-   where **audit recording lands**: the core decides but does no I/O, so every
-   forward/block becomes a tamper-evident entry here (invariant 7), threading the
-   policy `matched_rule`/`critical` through alongside the decision.
-3. **TLS MITM** — rustls + an rcgen-generated local CA, plus the CA-trust
-   onboarding UX (off by default; the user opts in).
-4. **Cockpit/daemon `ask` routing + body-content exfiltration inspection**
-   (`context.body.contains_secret`).
+1. **Mediation core** *(done)* — `HttpRequest → Action → policy + broker`,
+   transport-agnostic and fully unit-tested. No TLS deps.
+2. **Live forward proxy + audit recording** *(done)* — hudsucker `HttpHandler`
+   (`server.rs`); records every decision **before acting** (invariant 7), threading
+   `matched_rule`. On the egress critical path it **fails closed** if the audit log
+   is unavailable (invariant 5), rather than the gateway's fail-open convenience.
+3. **TLS MITM** *(done)* — rustls + an rcgen-generated local CA (`ca.rs`, key
+   `0o600`/atomic/redacted), `guardian proxy` CLI + `--print-ca-path`. Egress is
+   **default-deny**: the `CONNECT` authority is mediated too (an un-allowlisted host
+   gets no tunnel), closing the raw-protocol-after-CONNECT bypass. CA-trust **UI**
+   onboarding is still deferred (CLI + docs for now).
+4. **Cockpit/daemon `ask` routing + WebSocket-frame & body-content exfiltration
+   inspection** *(deferred)* (`context.body.contains_secret`). The WS *upgrade*
+   host is already policed; individual frames over an allowed tunnel are not yet.
 
 The core normalizes the request host (lowercase, default port stripped) so the
 policy context and broker lookup share one key. **HTTP policy rules reference
@@ -39,11 +43,13 @@ policy context and broker lookup share one key. **HTTP policy rules reference
 path is *not* `context.path`, which stays reserved for filesystem actions).
 
 ## Consequences
-- The TLS dependencies (increments 2–3) pull `rustls`/`ring` (or `aws-lc-rs`),
-  whose licenses (e.g. ring's mixed ISC/MIT/OpenSSL-derived terms) will likely need
-  a reviewed `deny.toml` allowance/exception — **tracked**, handled when those deps
-  land (the mediation core deliberately avoids them so it stays light and
-  cargo-deny-clean).
+- The TLS dependencies (increments 2–3) pull `rustls` with **both** `ring` and
+  `aws-lc-rs` (hudsucker's `tokio-rustls` default features force the latter; we use
+  `aws_lc_rs` as the active provider). In the end the crypto crates were already
+  Apache-2.0/ISC, so **no exception was needed for them**; the only `deny.toml`
+  addition was `CDLA-Permissive-2.0` for `webpki-roots` (the Mozilla trusted-root
+  *data* list). `aws-lc-sys` builds via the C toolchain (clang here; `prebuilt-nasm`
+  helps Windows) — a build-environment note, tracked for the Windows story.
 - TLS interception means the user must install and trust a **local CA** — a
   security-sensitive step. It is opt-in, documented, and the CA key is generated and
   stored locally.
