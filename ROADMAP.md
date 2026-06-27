@@ -598,12 +598,12 @@ tamper-evident log — **with no LLM in the deny path**.
       wiring the daemon to open the audit signed with a keychain-sealed key by
       default, and a `--require-signed-policy` loader flag.
 - [~] 9.3 Packaging: signed/notarized macOS build, Windows installer, Linux
-      packages; Tauri bundler. **Done:** a `v*`-tag release workflow builds the
-      `guardian` CLI for macOS/Linux/Windows (unsigned); the Tauri bundler is enabled
-      (`ui/src-tauri/tauri.conf.json`); `docs/packaging.md` documents the build + the
-      signing/notarization steps. **Blocked on the maintainer:** signed/notarized
-      artifacts need the **Apple Developer ID + Windows code-signing certificates**
-      as CI secrets (the signing commands are ready to wire in).
+      packages; Tauri bundler. **Done & shippable now (unsigned, no certs needed):**
+      a `v*`-tag release workflow builds the `guardian` CLI for macOS/Linux/Windows;
+      `cargo install` works; the Tauri bundler is enabled; `docs/packaging.md`
+      documents distribution. **Optional later:** code signing / notarization to
+      remove the OS "unverified developer" warning — needs paid Apple/Windows certs
+      as CI secrets; the commands are ready to wire in. Not required to release.
 - [x] 9.4 Docs: user guide, policy-authoring guide, adapter-authoring guide,
       threat model finalized, ADRs. **Done:** `docs/user-guide.md` (end-to-end
       getting started), `docs/policy-authoring.md` (how-to + patterns; the formal
@@ -721,7 +721,7 @@ The MVP cuts corners that a real product cannot. These make the existing core
 | **M2** Contained | Phase 2 — proxy + sandbox + hook adapter + **MCP proxy (§7.5)** | 🟢 **done**: hook (§7.4), network proxy w/ TLS MITM + broker injection + body-exfil inspection + ask→cockpit (§7.1), CA-trust onboarding (§7.2), exec sandbox (§7.3), stdio MCP proxy (§7.5). Tracked niceties: WS frame inspection, Tauri CA button, Windows sandbox, Streamable HTTP (deferred). |
 | **M3** Delegated | Phase 3 — broker, learning, report, signed packs | 🟢 **done (pragmatic)**: broker OS-keychain + least-privilege caveats (§8.1), constrained adaptive suggestions (§8.2), safety report (§8.3), ed25519-signed policy packs (§8.4), lightweight verifiable credentials (§8.5), agent-adapter integrations (§8.6). Deferred w/ rationale: OAuth/hardware-keys/zeroize, full W3C-VC/DID interop, pack review/reputation registry. |
 | **Mp** Product | §9b productionization (persisted/signed audit, config, IPC, Checker, observability) | pending (+2–3 wks) |
-| **M4** 1.0 | Phase 4 — hardening + packaging + docs | 🟡 **substantially done**: §9.1 security pass, §9.2 sealed-key audit signing + policy-locking, §9.4 docs (user/policy/adapter guides + finalized threat model), §9.5 perf budget (~3.9 µs/decision, fast-path zero-LLM). §9.3: unsigned cross-platform release pipeline + Tauri bundler done; **signed/notarized artifacts blocked on the maintainer's Apple/Windows code-signing certificates** (CI secrets). Then 1.0 + the desktop GUI. |
+| **M4** 1.0 | Phase 4 — hardening + packaging + docs | 🟡 **substantially done**: §9.1 security pass, §9.2 sealed-key audit signing + policy-locking, §9.4 docs (user/policy/adapter guides + finalized threat model), §9.5 perf budget (~3.9 µs/decision, fast-path zero-LLM). §9.3: shippable now — unsigned cross-platform release pipeline + `cargo install` + Tauri bundler done (no certs needed); code signing is an optional later polish (paid Apple/Windows certs as CI secrets) to remove the OS warning. Then 1.0 + the desktop GUI. |
 
 Timelines assume AI-assisted implementation and tight scope discipline. M1 is the
 proof point; M4 is a shippable open-source 1.0.

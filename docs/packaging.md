@@ -1,7 +1,26 @@
 # Packaging & release (Phase 4 — §9.3)
 
-How Guardian is built into distributable artifacts, and what **requires the
-maintainer's signing certificates** (not in the repo).
+How Guardian is distributed. **Code-signing is optional** — Guardian ships fine
+unsigned on GitHub; signing only removes the OS "unverified developer" warning.
+
+## You do NOT need certificates to ship
+The supported, zero-cost path for an open-source tool:
+
+- **`cargo install`** (no signing involved — it's a local build from source):
+  ```sh
+  cargo install --git https://github.com/Vadale/project-guardian guardian-cli
+  # or from a clone:  cargo install --path crates/guardian-cli
+  ```
+- **GitHub Releases** — push a `v*` tag; the release workflow builds the binaries and
+  attaches them (see below). Users download and run them. They are **unsigned**, so
+  the OS shows a one-time warning the user clicks through:
+  - **macOS:** right-click the binary → **Open** (or System Settings → Privacy &
+    Security → **Open Anyway**). Once, then it runs normally.
+  - **Windows:** SmartScreen → **More info** → **Run anyway**.
+  - **Linux:** no warning; `chmod +x guardian` and run.
+
+Signing (below) is a later polish that removes those warnings — **not** a
+prerequisite for releasing.
 
 ## The CLI (`guardian`)
 ```sh
@@ -19,10 +38,11 @@ cd ui && npm install && npm run tauri build      # → .dmg/.app (macOS), .msi (
 ```
 (The `ui/` app is its own build, excluded from the Cargo workspace.)
 
-## Signing & notarization — **requires the maintainer's certificates**
-Distributing without these means users see "unidentified developer" / SmartScreen
-warnings. Adding them needs credentials that must be provided as **repo secrets**;
-they are intentionally **not** in the repo.
+## Optional: signing & notarization (removes the OS warning)
+This is a **polish step, not a requirement**. It removes the "unidentified
+developer" / SmartScreen warnings above. It needs paid certificates (Apple Developer
+Program ~$99/yr; a Windows code-signing cert) provided as **repo secrets** — kept
+intentionally **out** of the repo. Skip this until/unless you want the warnings gone.
 
 - **macOS** — an Apple **Developer ID Application** certificate. Sign and notarize:
   ```sh
@@ -40,7 +60,8 @@ they are intentionally **not** in the repo.
   GPG key; the AppImage can be GPG-signed.
 
 ### Status
-Unsigned cross-platform builds + the Tauri bundler config are in place. **Signed /
-notarized release artifacts are blocked on the maintainer providing the Apple
-Developer ID and Windows code-signing certificates** (as CI secrets); the signing
-commands above are ready to wire in once they exist.
+**Releasing is ready now** — unsigned cross-platform CLI builds (`v*` tag) +
+`cargo install` + the Tauri bundler config are all in place. Code signing /
+notarization is the only *optional* extra: it just removes the OS warning and needs
+paid certificates as CI secrets; the commands above are ready to wire in if/when you
+decide you want it.
