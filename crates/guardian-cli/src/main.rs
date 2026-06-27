@@ -89,6 +89,10 @@ enum Command {
         /// How many of the most recent entries to show.
         #[arg(long, default_value_t = 20)]
         limit: usize,
+        /// Trusted ed25519 public key (hex) of a **signed** log (§9.2): verifies the
+        /// head signature too, so a full rewrite without the sealed key is detected.
+        #[arg(long)]
+        verify_key: Option<String>,
     },
     /// Run the user-space HTTP(S) forward proxy (Phase 2): mediates the agent's web
     /// traffic with the same policy + token broker. Point the agent's
@@ -245,7 +249,11 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Decide { policy } => run_decide(policy),
         Command::Hook { policy } => run_claude_hook(policy),
-        Command::Log { audit, limit } => run_log(audit, limit),
+        Command::Log {
+            audit,
+            limit,
+            verify_key,
+        } => run_log(audit, limit, verify_key),
         Command::Proxy {
             listen,
             policy,
@@ -753,7 +761,7 @@ fn run_report(audit: Option<PathBuf>, window: usize) -> anyhow::Result<()> {
 
 /// Browse the tamper-evident audit log: print recent decisions and the integrity
 /// status. Read-only — never modifies the log.
-fn run_log(audit: Option<PathBuf>, limit: usize) -> anyhow::Result<()> {
+fn run_log(audit: Option<PathBuf>, limit: usize, verify_key: Option<String>) -> anyhow::Result<()> {
     let path = audit
         .or_else(|| std::env::var_os("GUARDIAN_AUDIT").map(PathBuf::from))
         .unwrap_or_else(|| guardian_daemon::config::guardian_dir().join("audit.db"));
@@ -763,9 +771,14 @@ fn run_log(audit: Option<PathBuf>, limit: usize) -> anyhow::Result<()> {
     }
     let log = AuditLog::open(&path)?;
     let total = log.len()?;
-    let intact = log.verify().is_ok();
+    // With a trusted key, verify the head signature too (§9.2); otherwise the
+    // hash-chain only.
+    let (intact, mode) = match &verify_key {
+        Some(key) => (log.verify_with_pubkey(key).is_ok(), "signed+chain"),
+        None => (log.verify().is_ok(), "chain"),
+    };
     println!(
-        "Audit log: {}  ({total} entries)  integrity: {}",
+        "Audit log: {}  ({total} entries)  integrity: {} ({mode})",
         path.display(),
         if intact { "OK" } else { "TAMPERED" }
     );

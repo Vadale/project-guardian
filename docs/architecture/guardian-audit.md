@@ -51,3 +51,15 @@ Suggestions are **advisory only** — Guardian never edits the policy — and a 
 **never suggested** if any of its entries was `critical` (invariant 4: critical
 categories — money / credential / exfiltration / deletion — are never auto-downgraded).
 This is why `AuditEntry` carries a `critical` flag. The CLI `guardian report` renders it.
+
+## Sealed-key head signing (§9.2)
+`AuditLog::open_signed(path, signing_key)` makes the log resist a **fully-privileged
+rewrite**: on every append it ed25519-signs `seq || head_hash` (stored in
+`audit_head_sig`). The hash-chain alone can't catch an attacker who rewrites every
+row *and* the head consistently — but they can't forge the head signature without the
+sealed key, so `verify()` fails. A read-only auditor (a different process, no secret)
+checks the head against an **externally-supplied** trusted key via
+`verify_with_pubkey(hex)` / `guardian log --verify-key <hex>` — the trusted key must
+come from outside the DB so it can't be swapped in. Keep the signing key sealed (e.g.
+the OS keychain). Without a key the log is the hash-chain only (still evident to
+naive edits/reorder/truncation).

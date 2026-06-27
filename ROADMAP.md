@@ -587,8 +587,16 @@ tamper-evident log — **with no LLM in the deny path**.
       every PR; the untrusted JSON→ToolCall→Action path has an in-gate randomized
       robustness test + a `cargo-fuzz` target (`fuzz/`). See `docs/hardening.md`.
       **Remaining:** continuous/coverage fuzz runs in CI.
-- [ ] 9.2 Self-protection: signed/locked policy, sealed signing key, fail-closed
+- [~] 9.2 Self-protection: signed/locked policy, sealed signing key, fail-closed
       verified end-to-end (Guardian is the highest-value target — see README §7).
+      **Done:** **sealed-key audit signing** — `AuditLog::open_signed` ed25519-signs
+      the head on every append; `verify`/`verify_with_pubkey` (+ `guardian log
+      --verify-key`) detect a full rewrite done without the key (test-proven).
+      **Signed/locked policy** is provided by §8.4 (deploy the policy as a signed
+      pack; `guardian pack verify --pubkey` before use). Self-protection + kill
+      switch + path-protection already land in the gateway (§7.4/§9b.6). **Remaining:**
+      wiring the daemon to open the audit signed with a keychain-sealed key by
+      default, and a `--require-signed-policy` loader flag.
 - [ ] 9.3 Packaging: signed/notarized macOS build, Windows installer, Linux
       packages; Tauri bundler.
 - [ ] 9.4 Docs: user guide, policy-authoring guide, adapter-authoring guide,

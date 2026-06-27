@@ -8,6 +8,17 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 ## [Unreleased] — design phase
 
 ### Implemented — 2026-06-27 (Phase 4 — Hardening)
+- **Sealed-key audit signing (`guardian-audit` + `guardian log --verify-key`, Phase 4
+  / §9.2)** — the tamper-evident log can now be **ed25519-signed at the head**:
+  `AuditLog::open_signed(path, key)` signs `seq || head_hash` on every append, so an
+  attacker who rewrites **every row and the head consistently** (which the hash-chain
+  alone can't catch) still can't produce a valid head signature — `verify()` fails.
+  A read-only auditor verifies with an **externally-supplied trusted key** via
+  `verify_with_pubkey()` / `guardian log --verify-key <hex>` (the key must come from
+  outside the DB, so it can't be swapped in). Test-proven: a full single-row rewrite
+  that keeps the hash-chain internally consistent is still caught by the signature.
+  The **signed/locked policy** half of §9.2 is provided by §8.4 (deploy the policy as
+  a signed pack, verify with `guardian pack verify --pubkey`). 4 new audit tests.
 - **Security-hardening pass + performance budget (Phase 4 / §9.1 + §9.5)** —
   documented and test/CI-enforced in `docs/hardening.md`. (1) **No `unsafe` we own**:
   every crate `#![forbid(unsafe_code)]`, now also asserted by a CI step so a new crate
