@@ -102,6 +102,26 @@ user," but provenance/logging makes misuse attributable.
 - Adaptive attacks may defeat static rules over time → scheduled red-teaming.
 - The Checker, if remote, is a network/privacy path → off by default, opt-in,
   per-action, logged.
+- **Exec sandbox strength (`guardian-sandbox`, §7.3) is a backstop, not isolation,
+  and is asymmetric across platforms.** Today the **macOS** profile (`(allow default)`
+  base) contains only **outbound network** and **filesystem writes** — reads,
+  `process-exec`, mach lookups and IPC stay allowed, so it is *not* process/IPC
+  isolation. **Linux** (`bubblewrap`) is stronger (read-only root + network
+  namespace) but still shares the host PID/IPC namespaces and sets no resource
+  limits (a sandboxed command can fork-bomb or fill the writable temp). Tracked
+  hardening: a deny-by-default macOS SBPL profile, `--unshare-pid/ipc` and rlimits
+  on Linux, and stricter validation of operator-supplied writable paths before they
+  are interpolated into the SBPL profile. Until then the **policy** should keep
+  `Exec` at `ask` or deny by default (exec is opaque: it carries no capability, so
+  the critical-category floor is not structurally enforced for it).
+- **Sandbox widening is operator-controlled, not policy-controlled (yet).** The
+  `guardian exec` `--allow-network` / `--writable` flags relax the sandbox; they are
+  operator inputs (the agent only supplies the command after `--`). A harness must
+  not let the agent compose these flags. Moving the widening into the policy rule is
+  tracked.
+- **WebSocket frame content over the proxy is not inspected** (the upgrade host is
+  policed; frames are not) — an allowed WS host is an unmediated channel until
+  frame inspection lands (§7.1 increment 4).
 
 ## 7. Framework mapping
 - **OWASP Top 10 for LLM Applications (2025):** LLM01 Prompt Injection, LLM02

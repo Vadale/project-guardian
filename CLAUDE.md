@@ -68,6 +68,7 @@ crates/guardian-audit       # hash-chained tamper-evident log
 crates/guardian-checker     # pluggable LLM translator/risk-scorer (advisory only)
 crates/guardian-mcp-gateway # MCP proxy adapter (primary interception)
 crates/guardian-proxy       # HTTP(S) MITM forward proxy (Phase 2)
+crates/guardian-sandbox     # OS sandbox backstop for exec-class actions (Phase 2)
 crates/guardian-broker      # identity & token broker (Phase 3)
 crates/guardian-daemon      # long-running service wiring it together
 crates/guardian-cli         # `guardian` CLI

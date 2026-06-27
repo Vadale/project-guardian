@@ -8,6 +8,23 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 ## [Unreleased] — design phase
 
 ### Implemented — 2026-06-27
+- **Exec sandbox backstop (`guardian-sandbox` + `guardian exec`, Phase 2 / ROADMAP
+  §7.3)** — a new dependency-free crate that runs an `exec`-class action **contained**
+  when the matched policy rule sets `sandbox = true`. Containment is delegated to an
+  **off-the-shelf OS tool** (no custom kernel code, invariant 6): `sandbox-exec`
+  (macOS Seatbelt) or `bubblewrap` (Linux). A `SandboxRunner` trait exposes `wrap()`
+  (builds the exact argv — unit-testable without a real sandbox) and `run()`; the
+  default is **restrictive** (network denied, filesystem read-only except temp) and
+  policy widens it (`--allow-network`, `--writable <path>`). `detect()` returns the
+  platform backend if its tool is on `PATH`, else `None` — and a sandboxed action
+  with **no backend fails closed** (refuses to run unconfined). New `guardian exec
+  [--policy] [--audit] [--allow-network] [--writable …] -- <cmd> …`: builds the
+  `Exec` action, evaluates the deterministic policy, **records the decision to the
+  audit log**, then refuses on deny/ask (exit 126) or runs the command — sandboxed
+  when the rule asked. Verified end-to-end on macOS: an allowed `echo` runs
+  sandboxed; `rm -rf` is denied and not run; a network attempt inside the sandbox
+  fails (`connect: Operation not permitted`); all three are audited. 6 unit tests
+  (argv construction for both backends + a backend-gated real network-denial check).
 - **Network proxy — live HTTP(S) forward proxy with TLS interception
   (`guardian-proxy` + `guardian proxy`, Phase 2 / ROADMAP §7.1, increments 2–3)** —
   the mediation core now drives **real sockets** via `hudsucker` (+ `rustls`/`rcgen`).

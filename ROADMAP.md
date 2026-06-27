@@ -126,6 +126,7 @@ project_guardian/
 │  ├─ guardian-checker/        # pluggable LLM translator/risk-scorer client
 │  ├─ guardian-mcp-gateway/    # MCP proxy adapter (primary interception)
 │  ├─ guardian-proxy/          # HTTP(S) MITM forward proxy (Phase 2)
+│  ├─ guardian-sandbox/        # OS sandbox backstop for exec-class actions (Phase 2)
 │  ├─ guardian-broker/         # identity & token broker (Phase 3)
 │  ├─ guardian-daemon/         # long-running service wiring it all together
 │  └─ guardian-cli/            # `guardian` CLI
@@ -417,8 +418,11 @@ tamper-evident log — **with no LLM in the deny path**.
   - [ ] CA-trust onboarding **UI** (currently CLI + docs); WebSocket-frame
         inspection; cockpit `ask` routing + body exfiltration inspection.
 - [ ] 7.2 CA-trust onboarding UX in the UI (install/trust the local CA safely).
-- [ ] 7.3 Sandbox wrapper: run `exec`-class tools inside `sandbox-exec`
-      (macOS) / `bubblewrap` (Linux) / AppContainer (Windows) / `docker`.
+- [x] 7.3 Sandbox wrapper: run `exec`-class tools inside `sandbox-exec`
+      (macOS) / `bubblewrap` (Linux). **Done** (`guardian-sandbox` crate:
+      `SandboxRunner` + `guardian exec` — sandboxes actions whose rule sets
+      `sandbox = true`; network/FS restricted by default; fails closed if no
+      backend). Windows AppContainer / `docker` fallback still pending.
 - [x] 7.4 Native hook adapter (Claude Code `PreToolUse`) → same policy engine,
       deterministic deny. **Done** (`guardian hook` + `coding-agent` policy +
       `examples/claude-code/`). Maps native tools → Action; unrecognized tools are

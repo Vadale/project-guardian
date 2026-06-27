@@ -1,0 +1,11 @@
+[package]
+name = "guardian-sandbox"
+description = "OS sandbox backstop: run exec-class actions contained (sandbox-exec / bubblewrap)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Intentionally dependency-free: it only shells out to off-the-shelf OS sandbox
+# tools (never custom kernel code — invariant 6).

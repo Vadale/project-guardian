@@ -1090,6 +1090,7 @@ dependencies = [
  "guardian-mcp-gateway",
  "guardian-policy",
  "guardian-proxy",
+ "guardian-sandbox",
  "ratatui",
  "serde_json",
  "tokio",
@@ -1167,6 +1168,10 @@ dependencies = [
  "tokio",
  "tracing",
 ]
+
+[[package]]
+name = "guardian-sandbox"
+version = "0.0.0"
 
 [[package]]
 name = "h2"
