@@ -14,6 +14,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod report;
+
 use std::path::Path;
 
 use guardian_core::{Action, Decision};
@@ -41,6 +43,11 @@ pub struct AuditEntry {
     pub checker_rationale: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_response: Option<String>,
+    /// True if the decision was in a **critical category** (money / credential /
+    /// exfiltration / irreversible deletion). Recorded so the report's adaptive
+    /// suggestions can refuse to ever propose loosening a critical rule (invariant 4).
+    #[serde(default)]
+    pub critical: bool,
 }
 
 impl AuditEntry {
@@ -51,6 +58,7 @@ impl AuditEntry {
         matched_rule: Option<String>,
         checker_rationale: Option<String>,
         user_response: Option<String>,
+        critical: bool,
     ) -> Self {
         let (decision, decision_reason) = match decision {
             Decision::Allow => ("allow".to_string(), None),
@@ -66,6 +74,7 @@ impl AuditEntry {
             matched_rule,
             checker_rationale,
             user_response,
+            critical,
         }
     }
 }
@@ -178,6 +187,7 @@ impl AuditLog {
                 matched_rule: None,
                 checker_rationale: None,
                 user_response: None,
+                critical: false,
             });
             out.push((seq as u64, entry));
         }
@@ -265,6 +275,7 @@ mod tests {
             matched_rule: None,
             checker_rationale: None,
             user_response: None,
+            critical: false,
         }
     }
 
@@ -378,8 +389,10 @@ mod tests {
         let decision = Decision::Deny {
             reason: "blocked".to_string(),
         };
-        let e = AuditEntry::for_decision(&action, &decision, Some("exfil".into()), None, None);
+        let e =
+            AuditEntry::for_decision(&action, &decision, Some("exfil".into()), None, None, true);
         assert_eq!(e.decision, "deny");
+        assert!(e.critical);
         assert_eq!(e.decision_reason.as_deref(), Some("blocked"));
         assert_eq!(e.action_kind, "Exec");
         assert_eq!(e.action_id, "01ABC");

@@ -288,6 +288,7 @@ impl GuardianHandler {
             outcome.matched_rule.clone(),
             None,
             None,
+            outcome.critical,
         );
         match self.audit.lock() {
             Ok(mut log) => log.append(&entry).is_ok(),
