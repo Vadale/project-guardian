@@ -8,6 +8,15 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 ## [Unreleased] — design phase
 
 ### Implemented — 2026-06-27 (Phase 4 — Hardening)
+- **Packaging & release pipeline (Phase 4 / §9.3)** — a `v*`-tag GitHub Actions
+  release workflow (`.github/workflows/release.yml`) builds the `guardian` CLI for
+  macOS (aarch64 + x86_64), Linux (x86_64), and Windows (x86_64) and attaches the
+  archives to the Release (unsigned developer builds). The **Tauri bundler** is
+  enabled (`ui/src-tauri/tauri.conf.json` → `bundle.active`, `targets: all`,
+  metadata). `docs/packaging.md` documents building and the signing/notarization
+  procedure. **Signed/notarized artifacts are blocked on the maintainer providing
+  the Apple Developer ID + Windows code-signing certificates** (as CI secrets) — the
+  signing commands are ready to wire in.
 - **Docs finalized (Phase 4 / §9.4)** — `docs/user-guide.md` (end-to-end getting
   started for the three integration modes + the flagship use case), and
   `docs/policy-authoring.md` (a practical how-to + patterns, complementing the formal
