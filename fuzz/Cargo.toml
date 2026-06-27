@@ -1,0 +1,23 @@
+# cargo-fuzz targets (ROADMAP §9.1). Excluded from the workspace — build/run with a
+# nightly toolchain: `cargo +nightly fuzz run parse_toolcall`.
+[package]
+name = "guardian-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+serde_json = "1"
+guardian-core = { path = "../crates/guardian-core" }
+guardian-mcp-gateway = { path = "../crates/guardian-mcp-gateway" }
+
+[[bin]]
+name = "parse_toolcall"
+path = "fuzz_targets/parse_toolcall.rs"
+test = false
+doc = false
+bench = false

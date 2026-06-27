@@ -580,16 +580,23 @@ tamper-evident log — **with no LLM in the deny path**.
 
 ## 9. Phase 4 — Hardening, packaging, 1.0
 
-- [ ] 9.1 Security pass: `cargo audit`/`cargo deny` clean; quarantine and review
-      all `unsafe`; fuzz the proxy/JSON-RPC parsers (`cargo-fuzz`).
+- [~] 9.1 Security pass: `cargo audit`/`cargo deny` clean; quarantine and review
+      all `unsafe`; fuzz the proxy/JSON-RPC parsers (`cargo-fuzz`). **Done:** all
+      crates `#![forbid(unsafe_code)]` (compiler- + CI-enforced; zero `unsafe` we
+      own — FFI only in vetted deps); `cargo deny` (RustSec DB = cargo-audit's) gates
+      every PR; the untrusted JSON→ToolCall→Action path has an in-gate randomized
+      robustness test + a `cargo-fuzz` target (`fuzz/`). See `docs/hardening.md`.
+      **Remaining:** continuous/coverage fuzz runs in CI.
 - [ ] 9.2 Self-protection: signed/locked policy, sealed signing key, fail-closed
       verified end-to-end (Guardian is the highest-value target — see README §7).
 - [ ] 9.3 Packaging: signed/notarized macOS build, Windows installer, Linux
       packages; Tauri bundler.
 - [ ] 9.4 Docs: user guide, policy-authoring guide, adapter-authoring guide,
       threat model finalized, ADRs.
-- [ ] 9.5 Performance: confirm the green fast-path never invokes the LLM; measure
-      added latency per action; budget and document it.
+- [x] 9.5 Performance: confirm the green fast-path never invokes the LLM; measure
+      added latency per action; budget and document it. **Done:** the fast path is
+      test-proven to never call the Checker (`checker_is_not_called_on_the_fast_path`);
+      measured **≈3.9 µs/decision**; budget documented in `docs/hardening.md`.
 
 > 🤖 **Reusable prompt — Task 9.1 (security hardening)**
 > ```
