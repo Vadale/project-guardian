@@ -597,8 +597,13 @@ tamper-evident log — **with no LLM in the deny path**.
       switch + path-protection already land in the gateway (§7.4/§9b.6). **Remaining:**
       wiring the daemon to open the audit signed with a keychain-sealed key by
       default, and a `--require-signed-policy` loader flag.
-- [ ] 9.3 Packaging: signed/notarized macOS build, Windows installer, Linux
-      packages; Tauri bundler.
+- [~] 9.3 Packaging: signed/notarized macOS build, Windows installer, Linux
+      packages; Tauri bundler. **Done:** a `v*`-tag release workflow builds the
+      `guardian` CLI for macOS/Linux/Windows (unsigned); the Tauri bundler is enabled
+      (`ui/src-tauri/tauri.conf.json`); `docs/packaging.md` documents the build + the
+      signing/notarization steps. **Blocked on the maintainer:** signed/notarized
+      artifacts need the **Apple Developer ID + Windows code-signing certificates**
+      as CI secrets (the signing commands are ready to wire in).
 - [x] 9.4 Docs: user guide, policy-authoring guide, adapter-authoring guide,
       threat model finalized, ADRs. **Done:** `docs/user-guide.md` (end-to-end
       getting started), `docs/policy-authoring.md` (how-to + patterns; the formal

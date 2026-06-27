@@ -21,6 +21,11 @@
     }
   },
   "bundle": {
-    "active": false
+    "active": true,
+    "targets": "all",
+    "category": "Utility",
+    "shortDescription": "AI guardian firewall — approvals cockpit",
+    "longDescription": "Guardian mediates an autonomous AI agent's actions against a deterministic policy and surfaces approvals. This is the desktop cockpit.",
+    "copyright": "Apache-2.0, Project Guardian contributors"
   }
 }
