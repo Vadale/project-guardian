@@ -11,6 +11,9 @@
 *.log
 /.guardian/
 *.local.toml
+# Broker secret files — never commit real tokens (keep the *.example.toml demos).
+*secrets*.toml
+!*secrets*.example.toml
 *.key
 *.pem
 .env

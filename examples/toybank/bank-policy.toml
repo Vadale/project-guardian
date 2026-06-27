@@ -1,0 +1,25 @@
+# Demo policy for the toy-bank broker vertical.
+# Reading the balance is allowed; moving money is a critical category → denied
+# (so a hallucination or prompt injection can't drain the account).
+version = 1
+role = "bank-demo"
+
+[defaults]
+decision = "ask"
+
+# Trusted classification for the proxied bank tools (namespaced `bank__<tool>`).
+[tools]
+bank__get_balance = "FileRead"   # a read → may be allowed
+bank__transfer = "Payment"       # money movement → critical
+
+[[rules]]
+id = "allow-balance-reads"
+when = 'action.kind == "FileRead"'
+decision = "allow"
+
+[[rules]]
+id = "deny-money-movement"
+when = 'action.capability == "Payment"'
+decision = "deny"
+critical = true
+explain = "Moving money is blocked — the agent was only asked to read the balance."
