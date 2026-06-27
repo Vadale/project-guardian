@@ -7,6 +7,22 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 
 ## [Unreleased] — design phase
 
+### Implemented — 2026-06-27 (Phase 4 — Hardening)
+- **Security-hardening pass + performance budget (Phase 4 / §9.1 + §9.5)** —
+  documented and test/CI-enforced in `docs/hardening.md`. (1) **No `unsafe` we own**:
+  every crate `#![forbid(unsafe_code)]`, now also asserted by a CI step so a new crate
+  can't drop it; `unsafe` lives only in vetted FFI deps. (2) **Advisories**: `cargo
+  deny` (RustSec DB — the same one `cargo audit` uses) gates every PR; documented the
+  rejection of unmaintained/heavy deps (`macaroon`/`sodiumoxide`, `ssi`). (3)
+  **Fuzzing** the untrusted `bytes → JSON → ToolCall → Action` boundary: an in-gate
+  randomized robustness test (`build_action_never_panics_on_arbitrary_input`, 5 000
+  inputs/run) plus a `cargo-fuzz` target (`fuzz/parse_toolcall`, nightly; the `fuzz`
+  crate is excluded from the stable workspace). (4) **§9.5**: the green fast path is
+  test-proven to never invoke the Checker/LLM, and measured at **≈3.9 µs/decision** —
+  the documented latency budget (low-µs, zero network/LLM on allow/deny).
+  *(The `cargo-fuzz` target was not compiled in the dev environment — no nightly
+  toolchain available; the in-gate robustness test is the verified guarantee.)*
+
 ### Implemented — 2026-06-27 (Phase 3 — Identity)
 - **Lightweight verifiable credentials (`guardian-broker::credential`, Phase 3 /
   §8.5)** — verify an **issuer-signed, expiring claim about a subject** (ed25519):

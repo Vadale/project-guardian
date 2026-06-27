@@ -13,6 +13,14 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+      - name: Forbid unsafe in our crates (§9.1)
+        run: |
+          miss=0
+          for f in crates/*/src/lib.rs crates/*/src/main.rs; do
+            [ -f "$f" ] || continue
+            grep -q 'forbid(unsafe_code)' "$f" || { echo "MISSING #![forbid(unsafe_code)]: $f"; miss=1; }
+          done
+          test "$miss" = 0
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy

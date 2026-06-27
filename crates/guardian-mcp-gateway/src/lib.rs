@@ -1132,6 +1132,49 @@ explain = "Sends an email on your behalf."
         assert!(forwarded.lock().unwrap().is_empty());
     }
 
+    #[test]
+    fn build_action_never_panics_on_arbitrary_input() {
+        // In-process fuzzing of the untrusted-input boundary (JSON → ToolCall →
+        // Action): garbage bytes and crafted values must never panic the
+        // normalizer. (See `fuzz/` for deep cargo-fuzz runs of the same path.)
+        let mut seed: u64 = 0x9e37_79b9_7f4a_7c15;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let kinds = [
+            "FileRead",
+            "Exec",
+            "HttpRequest",
+            "Email",
+            "Other",
+            "bogus",
+            "",
+        ];
+        for _ in 0..5000 {
+            // 1) raw bytes parsed as a JSON document.
+            let len = (next() % 96) as usize;
+            let bytes: Vec<u8> = (0..len).map(|_| (next() % 256) as u8).collect();
+            if let Ok(s) = std::str::from_utf8(&bytes) {
+                if let Ok(call) = serde_json::from_str::<ToolCall>(s) {
+                    let _ = build_action(&call, "fuzz", ActionId::new("f"), next() as i64);
+                }
+            }
+            // 2) a structurally-plausible ToolCall with random-ish fields.
+            let kind = kinds[(next() as usize) % kinds.len()];
+            let value = serde_json::json!({
+                "tool": format!("t{}", next() % 997),
+                "args": { "path": format!("/{}", next()), "method": "GET", "cmd": "x", "amount": (next() % 10000) as f64 },
+                "kind": if kind.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(kind.to_string()) },
+            });
+            if let Ok(call) = serde_json::from_value::<ToolCall>(value) {
+                let _ = build_action(&call, "fuzz", ActionId::new("f"), next() as i64);
+            }
+        }
+    }
+
     #[tokio::test]
     async fn checker_is_not_called_on_the_fast_path() {
         // PanicChecker panics if explain() runs; allow and deny must not call it.

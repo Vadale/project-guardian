@@ -4,7 +4,9 @@
 resolver = "2"
 members = ["crates/*"]
 # The Tauri app is its own build (heavy desktop deps); keep it out of the workspace.
-exclude = ["ui"]
+# `fuzz` is a cargo-fuzz crate (nightly + libfuzzer only); excluded so the stable
+# gate doesn't try to build it. Run it with `cargo +nightly fuzz run <target>`.
+exclude = ["ui", "fuzz"]
 
 [workspace.package]
 version = "0.0.0"
