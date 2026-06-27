@@ -9,6 +9,7 @@
 #![forbid(unsafe_code)]
 
 mod engine;
+pub mod pack;
 mod schema;
 
 pub use engine::{CompiledPolicy, EvalEnv, EvalOutcome};

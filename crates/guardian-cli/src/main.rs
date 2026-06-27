@@ -134,6 +134,13 @@ enum Command {
         #[command(subcommand)]
         action: BrokerAction,
     },
+    /// Sign or verify a community policy pack (Phase 3 / §8.4): an ed25519-signed
+    /// directory of policy TOML. Verification refuses unsigned/tampered packs and
+    /// packs that widen a critical category without explicit opt-in.
+    Pack {
+        #[command(subcommand)]
+        action: PackAction,
+    },
     /// Decide an `exec`-class command against the policy and, if allowed, run it —
     /// **sandboxed** (no network, read-only FS) when the matched rule sets
     /// `sandbox = true` (ROADMAP §7.3). Usage: `guardian exec [opts] -- <cmd> [args…]`.
@@ -168,6 +175,34 @@ enum BrokerAction {
     Delete { target: String },
     /// Report whether a secret is stored for <target> — never prints the value.
     Has { target: String },
+}
+
+#[derive(Subcommand)]
+enum PackAction {
+    /// Sign the policy `.toml` files in <dir>, writing `guardian-pack.json`. Uses
+    /// the 32-byte hex seed in --key-file (generated and saved there if absent).
+    Sign {
+        dir: PathBuf,
+        #[arg(long)]
+        name: String,
+        #[arg(long, default_value = "0.1.0")]
+        version: String,
+        /// File holding the publisher's hex signing seed (created if missing, 0600).
+        #[arg(long)]
+        key_file: PathBuf,
+    },
+    /// Verify <dir>: signature, file hashes, and (optionally) that the publisher is
+    /// --pubkey. Reports any critical-widening rules. Non-zero exit on failure.
+    Verify {
+        dir: PathBuf,
+        /// Required publisher public key (hex); if omitted, any valid signature is
+        /// accepted (still proves integrity, not provenance).
+        #[arg(long)]
+        pubkey: Option<String>,
+        /// Audit-log file to record the verified pack's provenance into.
+        #[arg(long)]
+        audit: Option<PathBuf>,
+    },
 }
 
 #[tokio::main]
@@ -219,6 +254,7 @@ async fn main() -> anyhow::Result<()> {
             .await
         }
         Command::Broker { action } => run_broker(action),
+        Command::Pack { action } => run_pack(action),
         Command::Exec {
             policy,
             audit,
@@ -519,6 +555,124 @@ fn run_broker(action: BrokerAction) -> anyhow::Result<()> {
             let present = keychain::load(&target)?.is_some();
             println!("{}", if present { "present" } else { "absent" });
         }
+    }
+    Ok(())
+}
+
+/// Sign or verify a signed community policy pack (§8.4).
+fn run_pack(action: PackAction) -> anyhow::Result<()> {
+    use guardian_policy::pack;
+    match action {
+        PackAction::Sign {
+            dir,
+            name,
+            version,
+            key_file,
+        } => {
+            // Reuse the seed if the key file exists; otherwise mint one and save it
+            // owner-only so the publisher key is stable across signings.
+            let seed_hex = if key_file.exists() {
+                std::fs::read_to_string(&key_file)?.trim().to_string()
+            } else {
+                let seed = pack::generate_seed_hex()?;
+                write_private_file(&key_file, &seed)?;
+                eprintln!(
+                    "guardian: generated a new signing key at {}",
+                    key_file.display()
+                );
+                seed
+            };
+            let signed = pack::sign_with_seed_hex(&dir, &name, &version, &seed_hex)?;
+            std::fs::write(
+                dir.join(pack::MANIFEST_FILE),
+                serde_json::to_string_pretty(&signed)?,
+            )?;
+            println!(
+                "Signed pack '{name}' v{version} ({} file(s)).",
+                signed.manifest.files.len()
+            );
+            println!(
+                "  publisher (share this to let others pin you): {}",
+                signed.publisher
+            );
+        }
+        PackAction::Verify { dir, pubkey, audit } => {
+            let signed = pack::load_signed(&dir)?;
+            pack::verify(&dir, &signed, pubkey.as_deref())
+                .map_err(|e| anyhow::anyhow!("pack verification FAILED: {e}"))?;
+            println!(
+                "OK: pack '{}' v{} verified ({} file(s)); publisher {}",
+                signed.manifest.name,
+                signed.manifest.version,
+                signed.manifest.files.len(),
+                signed.publisher
+            );
+            let widening = pack::critical_widening_rules(&dir)?;
+            if widening.is_empty() {
+                println!("  no critical-category widening.");
+            } else {
+                println!(
+                    "  WARNING: this pack widens critical categories (needs opt-in to load): {}",
+                    widening.join(", ")
+                );
+            }
+            if let Some(audit_path) = audit {
+                record_pack_provenance(&audit_path, &signed)?;
+                println!("  provenance recorded in {}", audit_path.display());
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Append a tamper-evident provenance entry for a verified pack (publisher, name,
+/// version) to the audit log, so what policy is trusted is itself auditable.
+fn record_pack_provenance(
+    audit_path: &std::path::Path,
+    signed: &guardian_policy::pack::SignedPack,
+) -> anyhow::Result<()> {
+    if let Some(parent) = audit_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let action = Action {
+        id: ActionId::new("pack"),
+        kind: ActionKind::Other,
+        tool: "policy-pack".to_string(),
+        args: json!({
+            "name": signed.manifest.name,
+            "version": signed.manifest.version,
+            "publisher": signed.publisher,
+        }),
+        capability: None,
+        context: guardian_core::ActionContext {
+            timestamp_ms: now_ms_cli(),
+            source: "pack-verify".to_string(),
+            session: None,
+            host: None,
+            principal: None,
+            path: None,
+            extra: serde_json::Map::new(),
+        },
+    };
+    let mut log = AuditLog::open(audit_path)?;
+    let entry = guardian_audit::AuditEntry::for_decision(
+        &action,
+        &Decision::Allow,
+        Some("pack-verified".to_string()),
+        None,
+        None,
+    );
+    log.append(&entry)?;
+    Ok(())
+}
+
+/// Write a secret file with owner-only permissions on unix (best-effort elsewhere).
+fn write_private_file(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
+    std::fs::write(path, contents)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
     }
     Ok(())
 }

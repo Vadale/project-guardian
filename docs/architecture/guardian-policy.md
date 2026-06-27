@@ -180,3 +180,22 @@ duplicate rule id, invalid `when`, and unsupported version. A regression guard
 (`shipped_default_policy_compiles`) loads
 [`policies/default/personal-assistant.toml`](../../policies/default/personal-assistant.toml)
 and asserts it compiles, keeping the shipped pack and the engine in lockstep.
+
+## Signed policy packs (`pack` module, §8.4)
+The `pack` module makes shared policy verifiable and supply-chain-safe. A **pack**
+is a directory of policy `.toml` plus `guardian-pack.json` — a manifest of each
+file's **blake3** hash, signed with **ed25519** by the publisher (manifest +
+publisher public key + signature, all hex).
+
+- `sign` / `sign_with_seed_hex` build the manifest (files sorted by name, signed
+  over a deterministic serialization) and write the publisher key + signature.
+- `verify` checks the signature against the publisher key, optionally requires a
+  pinned `trusted` publisher, ensures the on-disk `.toml` set equals the manifest
+  (no added/removed file), and re-hashes every file (no tampering).
+- `critical_widening_rules` returns rule ids that `allow` a `critical = true` action.
+  `load_pack` verifies, then **refuses** the pack if it has any such rule unless
+  `allow_critical` is set — a pack can never silently grant money / credential /
+  exfiltration / deletion. Invariant 4 holds across the supply chain.
+
+The CLI (`guardian pack sign|verify`) drives it and can record a verified pack's
+provenance (publisher, name, version) into the tamper-evident audit log.

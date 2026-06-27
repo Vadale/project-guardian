@@ -1,0 +1,19 @@
+# Sample community policy pack (unsigned — sign it with `guardian pack sign`).
+# Read-only web access: allow GETs, block state-changing requests. Contains no
+# critical-category widening, so it loads without an opt-in.
+version = 1
+role = "web-readonly"
+
+[defaults]
+decision = "ask"
+
+[[rules]]
+id = "allow-reads"
+when = '(action.args.method == "GET" || action.args.method == "HEAD")'
+decision = "allow"
+
+[[rules]]
+id = "deny-writes"
+when = 'action.args.method in ["POST", "PUT", "PATCH", "DELETE"]'
+decision = "deny"
+explain = "This read-only pack blocks state-changing requests."
