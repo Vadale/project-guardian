@@ -511,9 +511,15 @@ tamper-evident log — **with no LLM in the deny path**.
       **Done since:** injection at the **network proxy** (Phase 2, PR #15); secrets
       in the **OS keychain** (`keyring`) — `keychain` module + `guardian broker
       set/has/delete` + `guardian proxy --keychain` (no plaintext on disk).
-      **Remaining:** scoped **OAuth** (`oauth2`) and **macaroons** (`macaroon`) with
-      caveats (expiry, max amount, allowed hosts, source binding); hardware-backed
-      keys (`security-framework`/`tss-esapi`); in-memory secret zeroize.
+      **Done since:** least-privilege **caveats** (`guardian-broker::capability`):
+      expiry / allowed-hosts / max-amount / **fresh-approval-for-critical**, enforced
+      by `Broker::authorize` and wired into the proxy (`--caveats`). (Implemented
+      natively, dependency-free — the `macaroon` crate was **rejected**: it pulls the
+      **unmaintained `sodiumoxide`** + libsodium C lib, against the supply-chain gate;
+      in Guardian the agent never holds the credential, so a macaroon bearer token
+      buys little — the caveat *model* is what matters.) **Remaining:** scoped
+      **OAuth** (`oauth2`); hardware-backed keys; in-memory secret zeroize;
+      cryptographic delegation (HMAC/ed25519-backed capabilities) if needed.
 - [~] 8.2 Constrained adaptive learning: suggest green/yellow adjustments for
       low-risk actions, context-bound and decaying; **never** auto-downgrade
       critical categories. Surfaces as suggestions in the report, never silent.

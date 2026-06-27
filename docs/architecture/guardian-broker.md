@@ -42,10 +42,23 @@ exposing the secret.
   work). The keychain's at-rest protection is the platform's; a fully-compromised
   same-user process is out of scope (see `docs/threat-model.md`).
 
+## Least-privilege caveats (`capability` module, §8.1)
+A target may carry **`Caveats`** that attenuate how its credential is used:
+`not_after_ms` (expiry), `allowed_hosts`, `max_amount`, and
+`require_fresh_approval_for_critical` (a critical action needs a *fresh* approval —
+a cached grant is never enough). `Broker::authorize(target, &CapabilityRequest)`
+checks them at the boundary (the deterministic policy still decides allow/deny
+separately); the network proxy calls it on the allow path and blocks a violation.
+Caveats load from a TOML file via `guardian proxy --caveats`.
+
+Implemented **natively (dependency-free)**. The `macaroon` crate was **rejected**: it
+depends on the **unmaintained `sodiumoxide`** + libsodium C library, which conflicts
+with the `cargo deny` supply-chain gate — and because the **agent never holds the
+credential**, a macaroon bearer token buys little here. If cryptographic *delegation*
+is needed later, capabilities can be HMAC/ed25519-backed with crates we already use.
+
 ## Remaining (Phase 3)
-Scoped **OAuth** and **macaroons** with caveats (expiry, max amount, allowed hosts,
-source binding; critical-capability use always needs a fresh approval), and
-hardware-backed keys.
+Scoped **OAuth**, hardware-backed keys, in-memory secret zeroize.
 
 ## Dependencies
 `serde_json`, `toml`, `thiserror`, `keyring` (per-platform native backends). No

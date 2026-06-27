@@ -4,14 +4,18 @@
 //! token into an outbound tool-call (or, later, an HTTP request at the proxy) only
 //! after the action is allowed, so the agent's prompt/output never carries it.
 //!
-//! This is the **minimal V1** (ROADMAP §8.1 seed): secrets are a `target -> token`
-//! map loaded from a file/config. The full Phase 3 broker adds OS-keychain storage
-//! and macaroon/OAuth caveats (expiry, max amount, allowed hosts, source binding);
-//! that is where the reviewed keychain FFI will live. V1 has no FFI, so:
+//! Secrets can be a `target -> token` map (file/config) **or the OS keychain**
+//! ([`keychain`], §8.1 — no plaintext on disk). A target may carry least-privilege
+//! [`Caveats`] ([`capability`], §8.1): expiry, allowed hosts, a max amount, and a
+//! fresh-approval requirement for critical actions, enforced by [`Broker::authorize`]
+//! at the boundary. Still remaining for §8.1: scoped OAuth and hardware-backed keys.
 
 #![forbid(unsafe_code)]
 
+pub mod capability;
 pub mod keychain;
+
+pub use capability::{CapabilityRequest, CaveatViolation, Caveats};
 
 use std::collections::HashMap;
 
@@ -23,6 +27,9 @@ pub const DEFAULT_FIELD: &str = "auth_token";
 #[derive(Clone, Default)]
 pub struct Broker {
     secrets: HashMap<String, String>,
+    /// Optional least-privilege caveats per target (§8.1). A target with none is
+    /// unconstrained by the broker (the policy still decides allow/deny).
+    caveats: HashMap<String, Caveats>,
 }
 
 // Redact token values: a stray `{:?}` (a log line, a panic) must never leak them.
@@ -31,6 +38,7 @@ impl std::fmt::Debug for Broker {
         f.debug_struct("Broker")
             .field("targets", &self.secrets.keys().collect::<Vec<_>>())
             .field("tokens", &"<redacted>")
+            .field("caveats", &self.caveats.keys().collect::<Vec<_>>())
             .finish()
     }
 }
@@ -38,13 +46,43 @@ impl std::fmt::Debug for Broker {
 impl Broker {
     /// Build from an explicit `target -> token` map.
     pub fn new(secrets: HashMap<String, String>) -> Self {
-        Self { secrets }
+        Self {
+            secrets,
+            caveats: HashMap::new(),
+        }
     }
 
     /// Load from a TOML file of `target = "token"` entries (the V1 secret store).
     pub fn from_toml_str(s: &str) -> Result<Self, toml::de::Error> {
         let secrets: HashMap<String, String> = toml::from_str(s)?;
-        Ok(Self { secrets })
+        Ok(Self {
+            secrets,
+            caveats: HashMap::new(),
+        })
+    }
+
+    /// Attach least-privilege [`Caveats`] for `target` (§8.1). The proxy/gateway
+    /// calls [`authorize`](Self::authorize) before using the credential.
+    pub fn set_caveats(&mut self, target: &str, caveats: Caveats) {
+        self.caveats.insert(target.to_string(), caveats);
+    }
+
+    /// Load `target -> Caveats` from a TOML file (a `[target]` table per host).
+    pub fn caveats_from_toml_str(&mut self, s: &str) -> Result<(), toml::de::Error> {
+        let map: HashMap<String, Caveats> = toml::from_str(s)?;
+        self.caveats.extend(map);
+        Ok(())
+    }
+
+    /// Check a pending use of `target`'s credential against its caveats. `Ok(())`
+    /// if the target has no caveats (unconstrained) or the caveats permit it. The
+    /// deterministic policy still decides allow/deny independently — this is an
+    /// additional least-privilege gate the broker enforces at the boundary.
+    pub fn authorize(&self, target: &str, req: &CapabilityRequest) -> Result<(), CaveatViolation> {
+        match self.caveats.get(target) {
+            Some(caveats) => caveats.check(req),
+            None => Ok(()),
+        }
     }
 
     /// Build a broker by loading each target's secret from the **OS keychain**
@@ -197,6 +235,52 @@ mod tests {
             args.get("auth_token").and_then(|v| v.as_str()),
             Some("secret-123")
         );
+    }
+
+    #[test]
+    fn authorize_is_ok_without_caveats_and_enforces_them_when_set() {
+        let mut b = broker(); // holds target "bank"
+        let req = CapabilityRequest {
+            host: "bank",
+            now_ms: 5_000,
+            amount: None,
+            critical: false,
+            freshly_approved: false,
+        };
+        // No caveats for "bank" → unconstrained.
+        assert!(b.authorize("bank", &req).is_ok());
+        // Add an expiry in the past → now refused.
+        b.set_caveats(
+            "bank",
+            Caveats {
+                not_after_ms: Some(1_000),
+                ..Caveats::permissive()
+            },
+        );
+        assert_eq!(b.authorize("bank", &req), Err(CaveatViolation::Expired));
+    }
+
+    #[test]
+    fn caveats_load_from_toml() {
+        let mut b = broker();
+        b.caveats_from_toml_str("[bank]\nallowed_hosts = [\"bank.example\"]\nmax_amount = 50.0\n")
+            .unwrap();
+        let ok = CapabilityRequest {
+            host: "bank.example",
+            now_ms: 0,
+            amount: Some(40.0),
+            critical: false,
+            freshly_approved: false,
+        };
+        assert!(b.authorize("bank", &ok).is_ok());
+        let over = CapabilityRequest {
+            amount: Some(60.0),
+            ..ok
+        };
+        assert!(matches!(
+            b.authorize("bank", &over),
+            Err(CaveatViolation::AmountExceeded { .. })
+        ));
     }
 
     #[test]

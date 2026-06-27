@@ -8,6 +8,21 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 ## [Unreleased] — design phase
 
 ### Implemented — 2026-06-27 (Phase 3 — Identity)
+- **Least-privilege capability caveats (`guardian-broker::capability` + `guardian
+  proxy --caveats`, Phase 3 / §8.1)** — a brokered target can carry **caveats** that
+  attenuate how its credential may be used: **expiry** (`not_after_ms`),
+  **allowed_hosts**, **max_amount**, and **`require_fresh_approval_for_critical`** (a
+  critical action needs a *fresh* human approval — a cached grant is never enough).
+  `Broker::authorize(target, req)` checks them at the boundary; the network proxy
+  calls it on the allow path and **blocks** a violation (`freshly_approved` is true
+  only when the cockpit just approved *this* request). Caveats load from a TOML file
+  (`[target]` tables) via `--caveats`; see `examples/proxy/caveats.example.toml`.
+  Implemented **natively, dependency-free**: the `macaroon` crate was rejected — it
+  pulls the **unmaintained `sodiumoxide`** + libsodium C lib (against the
+  supply-chain gate), and since the agent never holds the credential a macaroon
+  bearer token adds little; the caveat *model* is the value. 8 new tests (each caveat
+  + broker `authorize` + TOML load + a proxy expired-capability gate). The full Phase
+  3 broker now: keychain storage + caveats; remaining = OAuth, hardware keys, zeroize.
 - **Integrations guide — agent adapters (`docs/integrations.md`, Phase 3 / §8.6)** —
   documents how to put Guardian in front of any harness using the **existing**
   interception boundaries (no new code, because Guardian mediates at the action

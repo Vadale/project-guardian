@@ -109,6 +109,11 @@ enum Command {
         /// file (repeatable). Manage it with `guardian broker set <target>`.
         #[arg(long = "keychain")]
         keychain: Vec<String>,
+        /// TOML file of per-target least-privilege caveats (§8.1): a `[target]`
+        /// table with `not_after_ms`, `allowed_hosts`, `max_amount`,
+        /// `require_fresh_approval_for_critical`.
+        #[arg(long)]
+        caveats: Option<PathBuf>,
         /// Audit-log file (default: `$GUARDIAN_AUDIT`, else `~/.guardian/audit.db`).
         #[arg(long)]
         audit: Option<PathBuf>,
@@ -246,6 +251,7 @@ async fn main() -> anyhow::Result<()> {
             policy,
             secrets,
             keychain,
+            caveats,
             audit,
             ca_dir,
             daemon,
@@ -257,6 +263,7 @@ async fn main() -> anyhow::Result<()> {
                 policy,
                 secrets,
                 keychain,
+                caveats,
                 audit,
                 ca_dir,
                 daemon,
@@ -388,6 +395,7 @@ async fn run_proxy(
     policy_path: Option<PathBuf>,
     secrets: Option<PathBuf>,
     keychain: Vec<String>,
+    caveats: Option<PathBuf>,
     audit: Option<PathBuf>,
     ca_dir: Option<PathBuf>,
     daemon: Option<PathBuf>,
@@ -427,6 +435,13 @@ async fn run_proxy(
         }
         None => guardian_broker::Broker::default(),
     };
+    // Least-privilege caveats per target (§8.1), if supplied.
+    if let Some(path) = &caveats {
+        let src = std::fs::read_to_string(path)?;
+        broker
+            .caveats_from_toml_str(&src)
+            .map_err(|e| anyhow::anyhow!("caveats file {}: {e}", path.display()))?;
+    }
     // Overlay any keychain-sourced secrets (preferred Phase 3 store).
     if !keychain.is_empty() {
         broker
