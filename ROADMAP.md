@@ -422,9 +422,12 @@ tamper-evident log — **with no LLM in the deny path**.
   - [x] **Cockpit `ask` routing** — `guardian proxy --daemon <socket>` routes a
         yellow decision to the daemon cockpit (`Approver` trait); approve → forward,
         deny/timeout/no-daemon → block (fail closed).
-  - [ ] CA-trust onboarding **UI** (currently CLI + docs, see §7.2); WebSocket
-        **frame-content** inspection (the upgrade is gated; frames are not yet).
-- [ ] 7.2 CA-trust onboarding UX in the UI (install/trust the local CA safely).
+  - [ ] WebSocket **frame-content** inspection (the upgrade is gated; individual
+        frames over an allowed tunnel are not yet inspected — tracked).
+- [~] 7.2 CA-trust onboarding (install/trust the local CA safely). **Done via CLI:**
+      `guardian proxy --install-ca` warns, prints copy-pasteable platform commands,
+      and on macOS runs `security add-trusted-cert` (the OS prompts for consent);
+      `--print-ca-path` shows the cert. A **Tauri GUI** button is the remaining nicety.
 - [x] 7.3 Sandbox wrapper: run `exec`-class tools inside `sandbox-exec`
       (macOS) / `bubblewrap` (Linux). **Done** (`guardian-sandbox` crate:
       `SandboxRunner` + `guardian exec` — sandboxes actions whose rule sets

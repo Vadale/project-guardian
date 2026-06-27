@@ -8,6 +8,16 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 ## [Unreleased] — design phase
 
 ### Implemented — 2026-06-27
+- **CA-trust onboarding (`guardian proxy --install-ca`, Phase 2 / §7.2)** — a guided
+  flow to trust the local proxy CA so HTTPS interception works. It **warns** that
+  trusting the CA lets Guardian intercept all TLS, prints **copy-pasteable,
+  platform-specific** instructions (`ca_trust_instructions`, a pure/tested function:
+  macOS Keychain / `security`, Linux `update-ca-certificates`, incl. how to remove
+  it later), and on macOS runs `security add-trusted-cert -r trustRoot -k <login
+  keychain>` — the OS prompts the user to authorize, so the consent gate is the
+  user's own. Installing a trusted root is security-sensitive and hard to reverse, so
+  it never happens silently (it requires the explicit `--install-ca` flag and OS
+  authorization).
 - **Proxy `ask` → cockpit routing (`guardian-proxy` + `guardian proxy --daemon`,
   Phase 2 / §7.1 increment 4)** — the network proxy can now resolve a yellow (`ask`)
   decision through a **human**, completing the traffic-light model for web traffic.
