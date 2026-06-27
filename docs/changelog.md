@@ -8,6 +8,22 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 ## [Unreleased] — design phase
 
 ### Implemented — 2026-06-27 (Phase 3 — Identity)
+- **Signed community policy packs (`guardian-policy::pack` + `guardian pack`, Phase 3
+  / §8.4)** — a **pack** is a directory of policy `.toml` plus `guardian-pack.json`:
+  a manifest listing each file's **blake3** hash, signed with **ed25519** by the
+  publisher. `guardian pack sign <dir> --name --version --key-file` signs (the
+  signing seed is generated into `--key-file` at `0600` on first use; the publisher
+  public key is printed to share). `guardian pack verify <dir> [--pubkey] [--audit]`
+  **refuses** an unsigned, tampered (file hash mismatch), file-added/removed, or
+  wrong-publisher pack (non-zero exit), reports any **critical-widening** rules, and
+  can record the verified pack's **provenance** (publisher, name, version) into the
+  tamper-evident audit log. The loader (`pack::load_pack`) refuses a pack that
+  `allow`s a `critical = true` rule (money / credential / exfiltration / deletion)
+  unless the caller explicitly opts in — packs can never silently widen a critical
+  category. ed25519-dalek + blake3 + hex (licenses already permitted). 6 pack unit
+  tests (signed-ok, tampered-file, added-file, wrong-publisher, critical-widening
+  blocked-without-opt-in, unsigned-not-a-pack); verified e2e via the CLI. Example +
+  workflow in `examples/packs/`.
 - **Broker secrets in the OS keychain (`guardian-broker` keychain store + `guardian
   broker`, Phase 3 / §8.1)** — credentials now live in the **platform credential
   store** (Apple Keychain / Windows Credential Manager / Linux kernel keyutils via

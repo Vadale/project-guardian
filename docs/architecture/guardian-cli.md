@@ -47,6 +47,12 @@ front-end over the other crates — no policy logic of its own.
   and on macOS runs `security add-trusted-cert`, which the OS prompts you to
   authorize). `--daemon <socket>` routes `ask` decisions to that daemon's cockpit for
   human approval (else `ask` fails closed). Backed by `guardian-proxy`.
+- **`pack {sign,verify} <dir>`** — sign or verify a **signed community policy pack**
+  (Phase 3 / §8.4): an ed25519-signed directory of policy TOML. `sign` writes
+  `guardian-pack.json` (manifest + publisher key + signature; signing seed in
+  `--key-file`, `0600`). `verify` refuses unsigned/tampered/added-file/wrong-publisher
+  packs (non-zero exit), reports critical-widening rules, and with `--audit` records
+  the pack's provenance. Backed by `guardian-policy::pack`.
 - **`broker {set,has,delete} <target>`** — manage broker secrets in the **OS
   keychain** (Phase 3). `set` reads the secret from **stdin** (keeps it out of shell
   history); `has` prints only `present`/`absent` (never the value); `delete` removes

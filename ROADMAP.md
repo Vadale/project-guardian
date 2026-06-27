@@ -519,9 +519,14 @@ tamper-evident log — **with no LLM in the deny path**.
       critical categories. Surfaces as suggestions in the report, never silent.
 - [ ] 8.3 Periodic report (the "safety service report"): batch low-risk
       auto-approvals, blocked threats, and rule suggestions to confirm.
-- [ ] 8.4 Signed community policy packs + trust pipeline: ed25519-signed packs,
+- [~] 8.4 Signed community policy packs + trust pipeline: ed25519-signed packs,
       review/reputation, and a hard rule that packs cannot widen critical-category
-      permissions without explicit user opt-in.
+      permissions without explicit user opt-in. **Done:** `guardian-policy::pack`
+      (ed25519 over a blake3 file manifest) + `guardian pack sign|verify` — refuses
+      unsigned/tampered/added-file/wrong-publisher packs, and `load_pack` refuses a
+      pack that `allow`s a `critical = true` rule unless `allow_critical`; verify can
+      record provenance (publisher, name, version) into the audit log. **Remaining:**
+      a review/reputation registry and pack-loading wired into the daemon/gateway.
 - [ ] 8.5 W3C Verifiable Credentials / DIDs (`ssi`) for decentralized identity.
 - [ ] 8.6 More adapters: Cursor, OpenAI Agents runtime, generic MCP clients.
 
