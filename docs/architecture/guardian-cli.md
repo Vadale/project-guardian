@@ -39,11 +39,13 @@ front-end over the other crates — no policy logic of its own.
   audit log (the "black box"): prints the integrity status (`verify()` → OK/TAMPERED),
   the entry count, and a table of recent decisions. Resilient to a corrupt row
   (renders `<unreadable>`); never modifies the log.
-- **`proxy [--listen <addr>] [--policy] [--secrets] [--audit] [--ca-dir] [--print-ca-path]`**
+- **`proxy [--listen <addr>] [--policy] [--secrets] [--audit] [--ca-dir] [--daemon] [--print-ca-path]`**
   — the user-space HTTP(S) forward proxy (Phase 2). Point the agent's
   `HTTP_PROXY`/`HTTPS_PROXY` at it; mediates web traffic with the same policy +
   token broker, generates/uses a local CA for HTTPS interception (`--print-ca-path`
-  shows the cert to install). Backed by `guardian-proxy`.
+  shows the cert to install). `--daemon <socket>` routes `ask` decisions to that
+  daemon's cockpit for human approval (else `ask` fails closed). Backed by
+  `guardian-proxy`.
 - **`exec [--policy] [--audit] [--allow-network] [--writable <path>] -- <cmd> …`** —
   decide an `exec`-class command against the policy and, if allowed, run it —
   **sandboxed** (network/FS restricted) when the matched rule sets `sandbox = true`

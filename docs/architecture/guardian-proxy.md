@@ -52,6 +52,12 @@ gateway, so web and MCP traffic are governed consistently.
 3. forwards (attaching the broker `Authorization` on `Allow`, for a real request) or
    returns a `403` carrying the block reason.
 
+An `ask` (yellow) decision is resolved by a **human** when an `Approver` is wired
+(`guardian proxy --daemon <socket>` bridges to the daemon cockpit): approve → forward,
+deny/timeout/unreachable-daemon → block. Without an approver, `ask` fails closed. The
+pipeline is `prepare` → `record_or_fail` (audit before acting; fail closed if it can't
+record) → `resolve_and_respond`.
+
 **Egress is default-deny.** A `CONNECT` only opens a TLS tunnel, but it is **also
 mediated** (on its authority/host): an un-allowlisted host gets no tunnel at all, so a
 non-HTTP protocol can't be smuggled through an opaque tunnel. The credential is never

@@ -111,6 +111,10 @@ enum Command {
         /// Directory holding the local CA (default: `<guardian-dir>/proxy-ca`).
         #[arg(long)]
         ca_dir: Option<PathBuf>,
+        /// Route `ask` decisions to a running daemon's cockpit for human approval
+        /// (its control socket). Without it, `ask` fails closed (blocked).
+        #[arg(long)]
+        daemon: Option<PathBuf>,
         /// Print the CA certificate path (to install/trust) and exit.
         #[arg(long)]
         print_ca_path: bool,
@@ -170,8 +174,20 @@ async fn main() -> anyhow::Result<()> {
             secrets,
             audit,
             ca_dir,
+            daemon,
             print_ca_path,
-        } => run_proxy(listen, policy, secrets, audit, ca_dir, print_ca_path).await,
+        } => {
+            run_proxy(
+                listen,
+                policy,
+                secrets,
+                audit,
+                ca_dir,
+                daemon,
+                print_ca_path,
+            )
+            .await
+        }
         Command::Exec {
             policy,
             audit,
@@ -290,6 +306,7 @@ async fn run_proxy(
     secrets: Option<PathBuf>,
     audit: Option<PathBuf>,
     ca_dir: Option<PathBuf>,
+    daemon: Option<PathBuf>,
     print_ca_path: bool,
 ) -> anyhow::Result<()> {
     use guardian_proxy::ca::LocalCa;
@@ -333,7 +350,12 @@ async fn run_proxy(
 
     let ca = LocalCa::load_or_generate(&ca_dir)?;
     let (cert_path, _) = LocalCa::paths(&ca_dir);
-    let handler = guardian_proxy::server::GuardianHandler::new(policy, env, broker, audit_log);
+    let mut handler = guardian_proxy::server::GuardianHandler::new(policy, env, broker, audit_log);
+    if let Some(socket) = &daemon {
+        handler = handler.with_approver(Arc::new(ProxyDaemonApprover {
+            client: guardian_daemon::DaemonClient::new(socket.clone()),
+        }));
+    }
 
     println!("guardian proxy listening on http://{addr}");
     println!("  audit log : {}", audit_path.display());
@@ -341,6 +363,10 @@ async fn run_proxy(
         "  local CA  : {} (install/trust for HTTPS)",
         cert_path.display()
     );
+    match &daemon {
+        Some(s) => println!("  ask → cockpit at {}", s.display()),
+        None => println!("  ask → fail-closed (no --daemon cockpit wired)"),
+    }
     println!("  point the agent at it: export HTTP_PROXY=http://{addr} HTTPS_PROXY=http://{addr}");
     println!("  Ctrl-C to stop.");
 
@@ -835,6 +861,36 @@ impl Approver for DaemonApprover {
             Ok(true) => ApprovalResponse::Approved,
             _ => ApprovalResponse::Denied,
         }
+    }
+}
+
+/// Bridges the network proxy's `ask` decisions to a running daemon's cockpit, so
+/// the proxy stays decoupled from the daemon IPC (it only knows the `Approver`
+/// trait). A no-answer/timeout from the daemon resolves to deny (fail closed).
+struct ProxyDaemonApprover {
+    client: guardian_daemon::DaemonClient,
+}
+
+#[async_trait]
+impl guardian_proxy::server::Approver for ProxyDaemonApprover {
+    async fn approve(&self, action: &Action) -> bool {
+        let host = action.context.host.as_deref().unwrap_or("?");
+        let method = action
+            .args
+            .get("method")
+            .and_then(Value::as_str)
+            .unwrap_or("?");
+        let path = action
+            .args
+            .get("path")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let plain = format!("Network request: {method} {host}{path}");
+        // Network egress that reaches `ask` warrants a visible risk level.
+        self.client
+            .approve(action.id.as_str(), &action.tool, &plain, 6)
+            .await
+            .unwrap_or(false)
     }
 }
 

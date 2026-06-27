@@ -415,8 +415,15 @@ tamper-evident log — **with no LLM in the deny path**.
         `0o600` (atomic) + redacted `Debug`; `guardian proxy` CLI + `--print-ca-path`.
         **Egress is default-deny**: the `CONNECT` authority is policed too, so an
         un-allowlisted host gets no tunnel (closes the raw-protocol bypass).
-  - [ ] CA-trust onboarding **UI** (currently CLI + docs); WebSocket-frame
-        inspection; cockpit `ask` routing + body exfiltration inspection.
+  - [x] **Body exfiltration inspection** — the proxy buffers the request body
+        (capped) and exposes `body_contains_known_secret` etc. to the policy; a rule
+        blocks an outbound body carrying one of the user's stored credentials.
+        WebSocket upgrades are gateable (`extra.upgrade`).
+  - [x] **Cockpit `ask` routing** — `guardian proxy --daemon <socket>` routes a
+        yellow decision to the daemon cockpit (`Approver` trait); approve → forward,
+        deny/timeout/no-daemon → block (fail closed).
+  - [ ] CA-trust onboarding **UI** (currently CLI + docs, see §7.2); WebSocket
+        **frame-content** inspection (the upgrade is gated; frames are not yet).
 - [ ] 7.2 CA-trust onboarding UX in the UI (install/trust the local CA safely).
 - [x] 7.3 Sandbox wrapper: run `exec`-class tools inside `sandbox-exec`
       (macOS) / `bubblewrap` (Linux). **Done** (`guardian-sandbox` crate:

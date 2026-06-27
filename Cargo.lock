@@ -1153,6 +1153,7 @@ dependencies = [
 name = "guardian-proxy"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
  "bytes",
  "guardian-audit",
  "guardian-broker",
