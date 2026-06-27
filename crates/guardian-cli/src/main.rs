@@ -52,6 +52,10 @@ enum Command {
         /// Policy file for the local gateway (proxy / default modes; not --daemon).
         #[arg(long)]
         policy: Option<PathBuf>,
+        /// Token-broker secrets file (`target = "token"`). In proxy mode the token
+        /// is injected into upstream calls so the agent never sees the credential.
+        #[arg(long)]
+        secrets: Option<PathBuf>,
     },
     /// Open the terminal cockpit to review and approve pending actions.
     Ui {
@@ -88,7 +92,8 @@ async fn main() -> anyhow::Result<()> {
             daemon,
             upstream,
             policy,
-        } => run_mcp(daemon, upstream, policy).await,
+            secrets,
+        } => run_mcp(daemon, upstream, policy, secrets).await,
         Command::Ui { daemon, demo } => {
             let socket = daemon
                 .or_else(|| std::env::var_os("GUARDIAN_SOCK").map(PathBuf::from))
@@ -369,6 +374,57 @@ impl Upstream for DemoUpstream {
     }
 }
 
+/// Wraps an upstream so the token broker injects the destination's credential into
+/// each forwarded call — the agent never supplies (or sees) it. The destination is
+/// the namespace label (`label__tool`), or the whole tool name if unnamespaced.
+/// The credential field is broker-owned (any agent-supplied value is scrubbed), and
+/// a token is injected only for a known registered upstream label.
+struct BrokeredUpstream {
+    broker: guardian_broker::Broker,
+    targets: std::collections::HashSet<String>,
+    inner: Box<dyn Upstream>,
+}
+
+#[async_trait]
+impl Upstream for BrokeredUpstream {
+    async fn forward(&self, call: &ToolCall) -> Result<Value, String> {
+        let mut call = call.clone();
+        // The credential field is broker-owned: drop any agent-supplied value so the
+        // agent can neither set nor keep a credential there.
+        if let Some(obj) = call.args.as_object_mut() {
+            obj.remove(guardian_broker::DEFAULT_FIELD);
+        }
+        let target = call
+            .tool
+            .split_once("__")
+            .map(|(label, _)| label.to_string())
+            .unwrap_or_else(|| call.tool.clone());
+        // Inject only for a known, registered upstream label (no cross-target leak).
+        if self.targets.contains(&target) {
+            self.broker.inject(&target, &mut call.args);
+        }
+        self.inner.forward(&call).await
+    }
+}
+
+/// Warn (don't fail) if a secrets file is group/other-accessible.
+fn warn_if_world_readable(path: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if let Ok(meta) = std::fs::metadata(path) {
+            if meta.mode() & 0o077 != 0 {
+                eprintln!(
+                    "guardian: warning: secrets file {} is group/other-accessible; `chmod 600` it",
+                    path.display()
+                );
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+}
+
 async fn run_demo() -> anyhow::Result<()> {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/home/user".to_string());
     let env = EvalEnv {
@@ -499,6 +555,7 @@ async fn run_mcp(
     daemon: Option<PathBuf>,
     upstream: Vec<String>,
     policy: Option<PathBuf>,
+    secrets: Option<PathBuf>,
 ) -> anyhow::Result<()> {
     // Proxy mode: front one or more real upstream MCP servers. Their tools are
     // UNTRUSTED, so the classifier comes only from the policy's `[tools]` map — a
@@ -508,6 +565,7 @@ async fn run_mcp(
     if !upstream.is_empty() {
         let single = upstream.len() == 1;
         let mut multi = guardian_mcp_gateway::upstream::MultiUpstream::new();
+        let mut labels = std::collections::HashSet::new();
         for spec in &upstream {
             let (label_opt, program, args) = parse_upstream(spec);
             if program.is_empty() {
@@ -526,6 +584,7 @@ async fn run_mcp(
                     "duplicate upstream label '{label}' — give each --upstream a unique label=..."
                 ));
             }
+            labels.insert(label);
         }
         let compiled = load_policy(&policy)?;
         let classifier = compiled.policy().tools.clone();
@@ -537,12 +596,28 @@ async fn run_mcp(
             }),
             None => Box::new(DenyAsksApprover),
         };
+        // With --secrets, the broker injects the credential for the destination
+        // (the namespace label) into each forwarded call — the agent never sees it.
+        let upstream: Box<dyn Upstream> = match &secrets {
+            Some(path) => {
+                warn_if_world_readable(path);
+                let src = std::fs::read_to_string(path)?;
+                let broker = guardian_broker::Broker::from_toml_str(&src)
+                    .map_err(|e| anyhow::anyhow!("secrets file {}: {e}", path.display()))?;
+                Box::new(BrokeredUpstream {
+                    broker,
+                    targets: labels,
+                    inner: Box::new(multi),
+                })
+            }
+            None => Box::new(multi),
+        };
         let gateway = Gateway::new(
             "guardian-mcp-proxy",
             compiled,
             Box::new(StubChecker),
             approver,
-            Box::new(multi),
+            upstream,
             AuditLog::open_in_memory()?,
             eval_env(),
         );
@@ -750,5 +825,80 @@ explain = "Shell commands are blocked here."
             claude_tool_to_call("mcp__files__read_secret", &json!({})).kind,
             Some(ActionKind::Other)
         );
+    }
+}
+
+#[cfg(test)]
+mod broker_wiring_tests {
+    use super::*;
+    use std::collections::{HashMap, HashSet};
+    use std::sync::{Arc, Mutex};
+
+    /// Records the call it was asked to forward (so tests can inspect injection).
+    struct Recorder(Arc<Mutex<Option<ToolCall>>>);
+    #[async_trait]
+    impl Upstream for Recorder {
+        async fn forward(&self, call: &ToolCall) -> Result<Value, String> {
+            *self.0.lock().unwrap() = Some(call.clone());
+            Ok(json!({ "ok": true }))
+        }
+    }
+
+    fn brokered(seen: Arc<Mutex<Option<ToolCall>>>) -> BrokeredUpstream {
+        BrokeredUpstream {
+            broker: guardian_broker::Broker::new(HashMap::from([(
+                "bank".to_string(),
+                "real-token".to_string(),
+            )])),
+            targets: HashSet::from(["bank".to_string()]),
+            inner: Box::new(Recorder(seen)),
+        }
+    }
+
+    #[tokio::test]
+    async fn injects_for_known_label_and_scrubs_agent_token() {
+        let seen = Arc::new(Mutex::new(None));
+        let bu = brokered(seen.clone());
+        // The agent tries to supply its own token; it must be replaced by the broker's.
+        let call = ToolCall {
+            tool: "bank__get_balance".to_string(),
+            args: json!({ "auth_token": "attacker", "account": "x" }),
+            kind: None,
+            capability: None,
+        };
+        bu.forward(&call).await.unwrap();
+        let fwd = seen.lock().unwrap().clone().unwrap();
+        assert_eq!(
+            fwd.args.get("auth_token").and_then(|v| v.as_str()),
+            Some("real-token")
+        );
+        assert_eq!(fwd.args.get("account").and_then(|v| v.as_str()), Some("x"));
+        // The caller's original call is not mutated.
+        assert_eq!(
+            call.args.get("auth_token").and_then(|v| v.as_str()),
+            Some("attacker")
+        );
+    }
+
+    #[tokio::test]
+    async fn unknown_label_scrubs_but_does_not_inject() {
+        let seen = Arc::new(Mutex::new(None));
+        let bu = brokered(seen.clone());
+        let call = ToolCall {
+            tool: "other__tool".to_string(),
+            args: json!({ "auth_token": "attacker" }),
+            kind: None,
+            capability: None,
+        };
+        bu.forward(&call).await.unwrap();
+        // No token for an unregistered label, and the agent's value was scrubbed.
+        assert!(seen
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap()
+            .args
+            .get("auth_token")
+            .is_none());
     }
 }

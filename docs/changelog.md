@@ -7,6 +7,24 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 
 ## [Unreleased] — design phase
 
+### Implemented — 2026-06-27
+- **Token broker (vertical seed)** (ROADMAP §8.1) — `guardian-broker::Broker` holds
+  `target → token` secrets so the **agent never sees the raw credential**: Guardian
+  injects the token into a tool-call only on the **forward (post-allow) path**, so
+  the audit log records the pre-injection action and nothing leaks. In the proxy,
+  `guardian mcp --upstream … --secrets <file>` wires a `BrokeredUpstream` that
+  injects the destination's token; the credential field is **broker-owned** (any
+  agent-supplied value is scrubbed) and a token is injected **only for a known
+  registered upstream label** (no cross-target leak). A live `examples/toybank/`
+  demo shows the headline behavior end to end: with the broker, *read balance*
+  works (token injected) while *transfer* is **blocked** by policy (money movement
+  is critical) — so a hallucination or prompt injection can't drain the account;
+  without the broker the bank returns `UNAUTHORIZED`. Reviewed by code-reviewer +
+  security-auditor; fixes applied (redacted `Debug` so `{:?}` can't leak tokens,
+  `*secrets*.toml` git-ignored, broker-owned field + known-label injection, a
+  world-readable secrets-file warning). V1 secret store is a file; OS keychain +
+  macaroon caveats remain Phase 3. Tests for injection/override/scrub + the wiring.
+
 ### Implemented — 2026-06-25
 - **Real Checker backend: `HttpChecker`** (ROADMAP §9b.4) — a model-backed advisory
   Checker that POSTs the structured action to a configured HTTP endpoint and parses

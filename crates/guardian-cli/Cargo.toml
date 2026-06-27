@@ -16,6 +16,7 @@ guardian-policy = { workspace = true }
 guardian-checker = { workspace = true }
 guardian-audit = { workspace = true }
 guardian-mcp-gateway = { workspace = true }
+guardian-broker = { workspace = true }
 guardian-daemon = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }

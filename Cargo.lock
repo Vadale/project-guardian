@@ -658,6 +658,10 @@ dependencies = [
 [[package]]
 name = "guardian-broker"
 version = "0.0.0"
+dependencies = [
+ "serde_json",
+ "toml",
+]
 
 [[package]]
 name = "guardian-checker"
@@ -682,6 +686,7 @@ dependencies = [
  "crossterm 0.29.0",
  "futures",
  "guardian-audit",
+ "guardian-broker",
  "guardian-checker",
  "guardian-core",
  "guardian-daemon",

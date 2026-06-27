@@ -36,4 +36,5 @@ guardian-policy = { path = "crates/guardian-policy" }
 guardian-audit = { path = "crates/guardian-audit" }
 guardian-checker = { path = "crates/guardian-checker" }
 guardian-mcp-gateway = { path = "crates/guardian-mcp-gateway" }
+guardian-broker = { path = "crates/guardian-broker" }
 guardian-daemon = { path = "crates/guardian-daemon" }

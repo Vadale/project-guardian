@@ -474,11 +474,16 @@ tamper-evident log — **with no LLM in the deny path**.
 
 ## 8. Phase 3 — Identity, learning, ecosystem
 
-- [ ] 8.1 `guardian-broker`: secrets in OS keychain (`keyring`); the agent never
-      sees raw credentials — it requests an authenticated action and the broker
-      injects creds at the proxy layer. Mechanisms: scoped OAuth (`oauth2`),
+- [~] 8.1 `guardian-broker`: the agent never sees raw credentials — Guardian holds
+      them and injects them at the boundary. **Seed done:** `Broker` (`target →
+      token`, V1 file store) + a `BrokeredUpstream` that injects on the post-allow
+      forward path (token never in the audit/logs/agent), credential-field
+      broker-owned, known-label-only injection; demoed end to end in
+      `examples/toybank/` (read allowed, money-movement blocked). **Remaining:**
+      secrets in the **OS keychain** (`keyring`); scoped **OAuth** (`oauth2`) and
       **macaroons** (`macaroon`) with caveats (expiry, max amount, allowed hosts,
-      source binding), hardware-backed keys later (`security-framework`/`tss-esapi`).
+      source binding); injection at the **network proxy** (Phase 2) for web
+      services; hardware-backed keys (`security-framework`/`tss-esapi`).
 - [ ] 8.2 Constrained adaptive learning: suggest green/yellow adjustments for
       low-risk actions, context-bound and decaying; **never** auto-downgrade
       critical categories. Surfaces as suggestions in the report, never silent.
