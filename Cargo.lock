@@ -1150,7 +1150,9 @@ name = "guardian-audit"
 version = "0.0.0"
 dependencies = [
  "blake3",
+ "ed25519-dalek",
  "guardian-core",
+ "hex",
  "rusqlite",
  "serde",
  "serde_json",

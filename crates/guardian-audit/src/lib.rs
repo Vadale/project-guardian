@@ -6,11 +6,12 @@
 //! table records the latest `(seq, hash)` so [`AuditLog::verify`] can also detect
 //! truncation of the tail — not just edits or reordering in the middle.
 //!
-//! **Tamper model.** The chain makes naive edits, reordering, and deletions
-//! *evident*: any such change breaks [`AuditLog::verify`]. It does **not** by
-//! itself stop a fully privileged attacker who rewrites every row *and* the head
-//! consistently — that requires signing the head with a sealed key. That hook is
-//! intentionally left for later behind the `signing` feature (ROADMAP Task 9.2).
+//! **Tamper model.** The chain alone makes naive edits, reordering, and deletions
+//! *evident*. To also stop a fully privileged attacker who rewrites every row *and*
+//! the head consistently, open the log with [`AuditLog::open_signed`] (ROADMAP
+//! §9.2): each append **ed25519-signs the head** (`seq || head_hash`) with a sealed
+//! key, so a forged head fails [`AuditLog::verify`]. A read-only auditor checks the
+//! head against an externally-supplied trusted key via [`AuditLog::verify_with_pubkey`].
 
 #![forbid(unsafe_code)]
 
@@ -18,6 +19,7 @@ pub mod report;
 
 use std::path::Path;
 
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use guardian_core::{Action, Decision};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
@@ -87,25 +89,47 @@ pub enum AuditError {
     Serde(#[from] serde_json::Error),
     #[error("audit log tampering detected: {0}")]
     Tampered(String),
+    #[error("bad signing/verifying key: {0}")]
+    BadKey(String),
 }
 
-/// An append-only, hash-chained audit log backed by SQLite.
+/// An append-only, hash-chained audit log backed by SQLite. Optionally **signs the
+/// chain head** with ed25519 (§9.2): with a (sealed) signing key, each append signs
+/// `seq || head_hash`, so an attacker who rewrites every row *and* the head still
+/// can't produce a valid signature — `verify` then fails. Without a key it is the
+/// hash-chain only (still evident to naive edits/reorder/truncation).
 pub struct AuditLog {
     conn: Connection,
+    /// When set, the head is signed on every append and checked by `verify`.
+    signing_key: Option<SigningKey>,
 }
 
 impl AuditLog {
-    /// Open (or create) a log at `path`.
+    /// Open (or create) a log at `path` (hash-chain only).
     pub fn open(path: impl AsRef<Path>) -> Result<Self, AuditError> {
-        Self::from_conn(Connection::open(path)?)
+        Self::from_conn(Connection::open(path)?, None)
+    }
+
+    /// Open (or create) a log at `path` whose head is **ed25519-signed** with
+    /// `signing_key` (keep it sealed — e.g. the OS keychain).
+    pub fn open_signed(
+        path: impl AsRef<Path>,
+        signing_key: SigningKey,
+    ) -> Result<Self, AuditError> {
+        Self::from_conn(Connection::open(path)?, Some(signing_key))
     }
 
     /// Open an in-memory log (useful for tests).
     pub fn open_in_memory() -> Result<Self, AuditError> {
-        Self::from_conn(Connection::open_in_memory()?)
+        Self::from_conn(Connection::open_in_memory()?, None)
     }
 
-    fn from_conn(conn: Connection) -> Result<Self, AuditError> {
+    /// In-memory log with a signed head (for tests).
+    pub fn open_in_memory_signed(signing_key: SigningKey) -> Result<Self, AuditError> {
+        Self::from_conn(Connection::open_in_memory()?, Some(signing_key))
+    }
+
+    fn from_conn(conn: Connection, signing_key: Option<SigningKey>) -> Result<Self, AuditError> {
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS audit_log (
                  seq       INTEGER PRIMARY KEY,
@@ -117,6 +141,10 @@ impl AuditLog {
                  id        INTEGER PRIMARY KEY CHECK (id = 0),
                  last_seq  INTEGER NOT NULL,
                  last_hash BLOB NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS audit_head_sig (
+                 id  INTEGER PRIMARY KEY CHECK (id = 0),
+                 sig BLOB NOT NULL
              );",
         )?;
         // Ensure the head row exists (genesis state for an empty log).
@@ -124,7 +152,7 @@ impl AuditLog {
             "INSERT OR IGNORE INTO audit_head (id, last_seq, last_hash) VALUES (0, 0, ?1)",
             params![GENESIS.to_vec()],
         )?;
-        Ok(Self { conn })
+        Ok(Self { conn, signing_key })
     }
 
     /// Append an entry, extending the chain. Returns the new sequence number.
@@ -146,6 +174,16 @@ impl AuditLog {
             "UPDATE audit_head SET last_seq = ?1, last_hash = ?2 WHERE id = 0",
             params![seq, hash.to_vec()],
         )?;
+        // Sign the new head if a signing key is configured (§9.2). The signature
+        // covers `seq || head_hash`, so the head can't be forged without the key.
+        if let Some(key) = &self.signing_key {
+            let sig = key.sign(&head_message(seq, &hash)).to_bytes().to_vec();
+            tx.execute(
+                "INSERT INTO audit_head_sig (id, sig) VALUES (0, ?1)
+                 ON CONFLICT(id) DO UPDATE SET sig = ?1",
+                params![sig],
+            )?;
+        }
         tx.commit()?;
         Ok(seq as u64)
     }
@@ -195,10 +233,56 @@ impl AuditLog {
         Ok(out)
     }
 
-    /// Walk the chain and confirm it is intact. Returns
-    /// [`AuditError::Tampered`] on the first inconsistency (broken link,
-    /// content edit, sequence gap/reorder, or tail truncation).
+    /// Walk the chain and confirm it is intact, **and** (if this log was opened with
+    /// a signing key) confirm the head signature. Returns [`AuditError::Tampered`]
+    /// on any inconsistency.
     pub fn verify(&self) -> Result<(), AuditError> {
+        let (head_seq, head_hash) = self.verify_chain()?;
+        if let Some(key) = &self.signing_key {
+            self.verify_head_sig(head_seq, &head_hash, &key.verifying_key())?;
+        }
+        Ok(())
+    }
+
+    /// Verify the chain **and** the head signature against an **externally-supplied
+    /// trusted public key** (hex), for a read-only verifier that doesn't hold the
+    /// secret. The trusted key must come from outside the DB (e.g. sealed config),
+    /// so an attacker who rewrites the DB can't also swap in their own key.
+    pub fn verify_with_pubkey(&self, trusted_pubkey_hex: &str) -> Result<(), AuditError> {
+        let bytes: [u8; 32] = hex::decode(trusted_pubkey_hex.trim())
+            .map_err(|e| AuditError::BadKey(e.to_string()))?
+            .try_into()
+            .map_err(|_| AuditError::BadKey("public key must be 32 bytes".into()))?;
+        let key =
+            VerifyingKey::from_bytes(&bytes).map_err(|e| AuditError::BadKey(e.to_string()))?;
+        let (head_seq, head_hash) = self.verify_chain()?;
+        self.verify_head_sig(head_seq, &head_hash, &key)
+    }
+
+    /// Check the stored head signature against `key`.
+    fn verify_head_sig(
+        &self,
+        head_seq: i64,
+        head_hash: &[u8],
+        key: &VerifyingKey,
+    ) -> Result<(), AuditError> {
+        let sig_bytes: Vec<u8> = self
+            .conn
+            .query_row("SELECT sig FROM audit_head_sig WHERE id = 0", [], |r| {
+                r.get(0)
+            })
+            .map_err(|_| AuditError::Tampered("head signature is missing".into()))?;
+        let sig_arr: [u8; 64] = sig_bytes
+            .try_into()
+            .map_err(|_| AuditError::Tampered("head signature is malformed".into()))?;
+        let sig = Signature::from_bytes(&sig_arr);
+        key.verify(&head_message(head_seq, head_hash), &sig)
+            .map_err(|_| AuditError::Tampered("head signature does not verify".into()))
+    }
+
+    /// Walk the chain and confirm it is intact (link/content/order/truncation),
+    /// returning the verified `(head_seq, head_hash)`.
+    fn verify_chain(&self) -> Result<(i64, Vec<u8>), AuditError> {
         let mut stmt = self
             .conn
             .prepare("SELECT seq, content, prev_hash, hash FROM audit_log ORDER BY seq ASC")?;
@@ -249,8 +333,16 @@ impl AuditLog {
                 "head mismatch: head records seq {head_seq} but chain ends at {last_seq} (tail truncation)"
             )));
         }
-        Ok(())
+        Ok((last_seq, last_hash))
     }
+}
+
+/// The bytes signed for the head: `seq` (LE) followed by the head hash.
+fn head_message(seq: i64, hash: &[u8]) -> Vec<u8> {
+    let mut m = Vec::with_capacity(8 + hash.len());
+    m.extend_from_slice(&seq.to_le_bytes());
+    m.extend_from_slice(hash);
+    m
 }
 
 /// `blake3(prev || content)` — the chaining hash.
@@ -277,6 +369,61 @@ mod tests {
             user_response: None,
             critical: false,
         }
+    }
+
+    fn signing_key() -> SigningKey {
+        SigningKey::from_bytes(&[7u8; 32])
+    }
+
+    #[test]
+    fn signed_head_verifies_and_a_swapped_signature_is_rejected() {
+        let mut log = AuditLog::open_in_memory_signed(signing_key()).unwrap();
+        log.append(&entry("a", "allow")).unwrap();
+        log.append(&entry("b", "deny")).unwrap();
+        assert!(log.verify().is_ok());
+        // External read-only verification with the trusted public key.
+        let pubkey = hex::encode(signing_key().verifying_key().to_bytes());
+        assert!(log.verify_with_pubkey(&pubkey).is_ok());
+        // The wrong key must not verify.
+        let other = hex::encode([9u8; 32]);
+        assert!(log.verify_with_pubkey(&other).is_err());
+        // Corrupting the stored signature is detected.
+        log.conn
+            .execute(
+                "UPDATE audit_head_sig SET sig = ?1 WHERE id = 0",
+                params![vec![0u8; 64]],
+            )
+            .unwrap();
+        assert!(log.verify().is_err());
+    }
+
+    #[test]
+    fn full_rewrite_without_the_key_fails_the_head_signature() {
+        // The sealed-key property: an attacker rewrites the (single) row's content
+        // AND re-chains the hash AND updates the head so the hash-chain is internally
+        // consistent — but without the signing key the head signature no longer
+        // matches the new head, so `verify` fails.
+        let mut log = AuditLog::open_in_memory_signed(signing_key()).unwrap();
+        log.append(&entry("a", "allow")).unwrap();
+
+        let forged = serde_json::to_string(&entry("a", "deny")).unwrap(); // flip allow→deny
+        let new_hash = chain_hash(&GENESIS, forged.as_bytes()).to_vec();
+        log.conn
+            .execute(
+                "UPDATE audit_log SET content = ?1, hash = ?2 WHERE seq = 1",
+                params![forged, new_hash],
+            )
+            .unwrap();
+        log.conn
+            .execute(
+                "UPDATE audit_head SET last_hash = ?1 WHERE id = 0",
+                params![new_hash],
+            )
+            .unwrap();
+        // The hash-chain alone is now internally consistent…
+        assert!(log.verify_chain().is_ok());
+        // …but the head signature was over the original head → verify fails.
+        assert!(matches!(log.verify(), Err(AuditError::Tampered(_))));
     }
 
     #[test]

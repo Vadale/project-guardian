@@ -13,8 +13,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 blake3 = "1.8.5"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
-
-[features]
-# Placeholder for the future ed25519 signature over the chain head (the hook is
-# documented in lib.rs). Disabled by default; no behavior yet.
-signing = []
+# ed25519 signature over the chain head (§9.2): seals the log so a fully-privileged
+# attacker can't rewrite every row *and* the head without the (sealed) signing key.
+ed25519-dalek = "2"
+hex = "0.4"
