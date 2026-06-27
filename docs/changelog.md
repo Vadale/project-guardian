@@ -7,6 +7,26 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 
 ## [Unreleased] — design phase
 
+### Implemented — 2026-06-27 (Phase 3 — Identity)
+- **Broker secrets in the OS keychain (`guardian-broker` keychain store + `guardian
+  broker`, Phase 3 / §8.1)** — credentials now live in the **platform credential
+  store** (Apple Keychain / Windows Credential Manager / Linux kernel keyutils via
+  `keyring`), so they are **never plaintext on disk** (the V1 was a TOML file) and
+  never shown to the agent. New `keychain` module (`store`/`load`/`delete`,
+  `NoEntry`→`None`); `Broker::from_keychain` / `add_keychain_targets` load secrets
+  into the in-memory map (the post-allow `inject` path is unchanged). New CLI:
+  `guardian broker set <target>` (secret read from **stdin** so it never lands in
+  argv/shell history), `guardian broker has <target>` (prints only `present`/`absent`
+  — never the value), `guardian broker delete <target>`; and `guardian proxy
+  --keychain <target>` sources a host's credential from the keychain (reporting which
+  targets resolved vs were not found, without printing values). `keyring` pinned to
+  3.x because 4.x requires Rust 1.88 > the workspace MSRV 1.75. Verified end-to-end on
+  macOS (store → injected by the proxy as `Authorization` → delete, no residue).
+  Reviewed by `code-reviewer` (approve) + `security-auditor` (no Critical/High; no
+  secret-leak vectors — applied the resolved/skipped startup notice; in-memory
+  zeroize tracked for the macaroon work). 13 broker tests (mock store; real keychain
+  round-trip behind `#[ignore]`).
+
 ### Implemented — 2026-06-27
 - **CA-trust onboarding (`guardian proxy --install-ca`, Phase 2 / §7.2)** — a guided
   flow to trust the local proxy CA so HTTPS interception works. It **warns** that

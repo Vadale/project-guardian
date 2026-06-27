@@ -11,6 +11,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod keychain;
+
 use std::collections::HashMap;
 
 /// The conventional args field Guardian injects the credential into when none is
@@ -43,6 +45,31 @@ impl Broker {
     pub fn from_toml_str(s: &str) -> Result<Self, toml::de::Error> {
         let secrets: HashMap<String, String> = toml::from_str(s)?;
         Ok(Self { secrets })
+    }
+
+    /// Build a broker by loading each target's secret from the **OS keychain**
+    /// (Phase 3 store — no plaintext on disk). Targets with no stored secret are
+    /// skipped: the proxy/gateway then holds no credential for them, so a request
+    /// needing one falls to the policy's default rather than leaking.
+    pub fn from_keychain(targets: &[String]) -> Result<Self, keychain::KeychainError> {
+        let mut broker = Self::default();
+        broker.add_keychain_targets(targets)?;
+        Ok(broker)
+    }
+
+    /// Overlay keychain-stored secrets for `targets` onto this broker (so a file
+    /// store and the keychain can be combined; keychain wins on conflict). Missing
+    /// targets are skipped.
+    pub fn add_keychain_targets(
+        &mut self,
+        targets: &[String],
+    ) -> Result<(), keychain::KeychainError> {
+        for target in targets {
+            if let Some(secret) = keychain::load(target)? {
+                self.secrets.insert(target.clone(), secret);
+            }
+        }
+        Ok(())
     }
 
     /// Whether a credential is held for `target`.
@@ -170,6 +197,20 @@ mod tests {
             args.get("auth_token").and_then(|v| v.as_str()),
             Some("secret-123")
         );
+    }
+
+    #[test]
+    fn from_keychain_skips_targets_without_a_stored_secret() {
+        // Mock store (no real keychain): the targets aren't present, so the broker
+        // simply holds no credential for them rather than erroring.
+        keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
+        let b = Broker::from_keychain(&[
+            "absent-a.example".to_string(),
+            "absent-b.example".to_string(),
+        ])
+        .unwrap();
+        assert!(!b.has("absent-a.example"));
+        assert!(!b.has("absent-b.example"));
     }
 
     #[test]

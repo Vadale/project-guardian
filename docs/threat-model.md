@@ -122,6 +122,14 @@ user," but provenance/logging makes misuse attributable.
 - **WebSocket frame content over the proxy is not inspected** (the upgrade host is
   policed; frames are not) — an allowed WS host is an unmediated channel until
   frame inspection lands (§7.1 increment 4).
+- **Broker keychain at-rest protection is the platform's.** Secrets stored via the
+  OS keychain (§8.1) are only as protected as the platform's at-rest encryption and
+  ACLs. On macOS the generic-password item is readable by any process running as the
+  **same user** once the keychain is unlocked (Guardian sets no per-app ACL) —
+  consistent with the model that Guardian and the agent are user-space peers and a
+  fully-compromised same-user process is out of scope. In-memory secrets are not yet
+  zeroized on drop (tracked for the macaroon work); no regression over the V1 file
+  store.
 
 ## 7. Framework mapping
 - **OWASP Top 10 for LLM Applications (2025):** LLM01 Prompt Injection, LLM02

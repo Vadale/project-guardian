@@ -9,3 +9,12 @@ rust-version.workspace = true
 [dependencies]
 serde_json = { workspace = true }
 toml = { workspace = true }
+thiserror = { workspace = true }
+
+# OS keychain storage so secrets never live in plaintext on disk. The native
+# backends (Apple Keychain, Windows Credential Manager, Linux kernel keyutils) are
+# enabled together; keyring target-gates the underlying sys crates internally, so
+# only the host platform's backend is actually compiled. linux-native uses kernel
+# keyutils (no libsecret/dbus build dependency, so CI stays clean).
+# keyring 3.x (MSRV 1.75, matching the workspace); 4.x needs Rust 1.88.
+keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
