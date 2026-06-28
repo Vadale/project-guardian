@@ -76,9 +76,13 @@ front-end over the other crates — no policy logic of its own.
 A `ratatui` TUI: a `DaemonClient` polls the daemon's pending queue and relays the
 user's allow/deny over the socket. No business logic — it renders state and sends
 decisions.
+- Two screens, toggled with **`Tab`**: **Approvals** (the pending queue) and the
+  **activity archive** (`history`) — recent decisions with outcome, kind, the host
+  the agent went to, the matched rule/reason, and a `[critical]` flag (fetched via
+  `DaemonClient::history`).
 - Keyboard (`j/k` select, `a` allow, `d` deny, `p` panic = deny-all, `r` refresh,
-  `q` quit) **and** mouse clicks on the `[A Allow]` / `[D Deny]` buttons
-  (hit-tested against recorded button rects).
+  `Tab` switch screen, `q` quit) **and** mouse clicks on the `[A Allow]` / `[D Deny]`
+  buttons (hit-tested against recorded button rects).
 - Theme (no emoji): bright green `#2EE66B` = confirm / low risk, bright red
   `#FF4646` = deny / high risk / errors, dark-green `#206040` accents; ASCII risk
   bars; live spinner; "all clear" empty state.
