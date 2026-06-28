@@ -59,8 +59,29 @@ self-description; egress allow-lists; provenance recorded in the log.
 ### 5.4 Malicious policy pack (supply chain)
 A community pack silently whitelists an exfiltration path. **Defense:** packs are
 ed25519-signed; loader refuses unsigned/altered packs; a pack can **not** widen a
-critical category without explicit user opt-in; pack provenance is logged. Maps to
-OWASP LLM03.
+critical category without explicit user opt-in; pack provenance is logged.
+**Defense in depth (runtime floor):** the loader's anti-widening check looks at a
+rule's self-declared `critical` flag, so a pack could try to `allow` a money/credential
+action while *omitting* the flag. The deterministic engine therefore also enforces an
+**intrinsic critical-category floor at evaluation time**: an action whose *capability*
+is a critical category (money, credentials, exfiltration, irreversible deletion) can
+never resolve to `allow` — a would-be allow is floored to `ask` — regardless of any
+rule or pack. The floor is intrinsic to the action's capability, not to a rule flag.
+**Coverage bound (be precise):** the floor keys off the action's *capability* tag, so
+its reach is only as complete as the adapter's capability tagging. Today the
+mcp-gateway tags `Payment`/`Credential`/`IrreversibleDelete`, so those are floored;
+but **`Exfiltration` is currently emitted by no adapter** — the network proxy detects
+exfiltration via the *rule* `extra.body_contains_known_secret`, not via a capability,
+and sets `capability = None`. So for the exfiltration scenario in this section the
+floor adds **no runtime coverage yet**: exfiltration protection still rests on the deny
+rule (a malicious pack would have to defeat that rule, which it cannot silently widen
+without the flag — but the intrinsic floor does not yet back it up). Likewise an
+`Exec`/`Other` action with no capability is not floored (it falls to the `Exec`
+rules / restrictive default). Closing this needs the proxy to tag
+`Capability::Exfiltration` **only for an untrusted destination** (a secret sent to a
+*trusted* host is legitimate, so naive tagging would over-block) — tracked, together
+with completing capability inference and optionally deriving criticality from
+`ActionKind`. Maps to OWASP LLM03.
 
 ### 5.5 Attack on Guardian itself
 Tamper with policy, steal brokered credentials, or forge the log. **Defense:**
@@ -76,8 +97,11 @@ Maps to OWASP Agentic "tool misuse" / "goal hijacking".
 
 ### 5.7 Habituation attack
 Train the adaptive layer to auto-allow, then strike. **Defense:** critical
-categories are never auto-downgraded; suggestions are context-bound and decay;
-learning is opt-in and surfaced in the report, never silent.
+categories are never auto-downgraded — now **runtime-enforced** by the intrinsic
+critical-category floor (§5.4): even if learning or a rule produced an `allow` for a
+money/credential/exfiltration/irreversible-delete action, the engine floors it to
+`ask`. Suggestions are context-bound and decay; learning is opt-in and surfaced in
+the report, never silent.
 
 ### 5.8 Excessive agency / over-broad delegation
 The agent is granted more authority than the task needs. **Defense:** least-

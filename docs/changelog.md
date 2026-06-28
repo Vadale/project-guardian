@@ -7,6 +7,25 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 
 ## [Unreleased]
 
+### Security — 2026-06-29 (intrinsic critical-category floor)
+- **The deterministic engine now enforces a runtime floor for critical categories**
+  (invariant #4). An action whose *capability* is a critical category — money
+  movement, credential access, data exfiltration, irreversible deletion — can **never
+  resolve to `allow`**, regardless of what any rule says, **not even a signed
+  community pack**. A would-be silent `allow` is floored to `ask` (with `critical`
+  set) so a human or a deny rule still gates it. **Why:** the pack-loader's
+  anti-widening check trusted the rule author's self-declared `critical = true` flag;
+  a malicious pack could `allow` a money/credential action while simply omitting the
+  flag and slip through. The floor is now intrinsic to the action's capability, not
+  to a rule's flag. Golden + adversarial tests added (`guardian-policy`): an explicit
+  `allow` for Payment/Credential is floored to `ask`; no critical capability is ever
+  allowed under an allow-everything policy; non-critical capabilities are unaffected.
+  **Coverage caveat:** the floor keys off the action's *capability*, so today it covers
+  Payment/Credential/IrreversibleDelete (tagged by the gateway) but **not yet
+  Exfiltration** (the proxy detects exfil via a rule, not a capability) nor untagged
+  `Exec`/`Other` actions — see `docs/threat-model.md` §5.4. Surfaced by the multi-suite
+  evaluation review (see `evaluation/`).
+
 ### Added — 2026-06-28 (evaluation results)
 - **Published the first Guardian evaluation scorecard** (`evaluation/README.md` §7).
   AgentDojo `banking` / `important_instructions`, local Ollama, A/B (agent alone vs

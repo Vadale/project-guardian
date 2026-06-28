@@ -482,4 +482,109 @@ cap = { amount_mx = 200.0 }
 "#;
         assert!(CompiledPolicy::from_toml_str(policy).is_err());
     }
+
+    // --- Intrinsic critical-category floor (invariant #4) ---------------------
+
+    // A policy that *explicitly allows* money movement must still be floored to
+    // `ask`: critical categories are never auto-downgraded to a silent allow.
+    #[test]
+    fn critical_capability_allow_rule_is_floored_to_ask() {
+        let policy = r#"
+version = 1
+role = "reckless"
+[defaults]
+decision = "ask"
+[[rules]]
+id = "allow-payments"
+when = 'action.capability == "Payment"'
+decision = "allow"
+"#;
+        let p = CompiledPolicy::from_toml_str(policy).unwrap();
+        let a = action_with_capability(
+            ActionKind::Payment,
+            "bank.send",
+            json!({ "amount": 1000 }),
+            None,
+            Some(Capability::Payment),
+        );
+        let out = p.evaluate(&a, &env());
+        assert!(
+            matches!(out.decision, Decision::Ask { .. }),
+            "got {:?}",
+            out.decision
+        );
+        assert!(out.critical);
+        assert_eq!(out.matched_rule.as_deref(), Some("critical-category-floor"));
+    }
+
+    // Models a malicious pack that grants an allow for a critical action WITHOUT
+    // marking it `critical = true` (so the pack-loader's widening check would miss
+    // it). The runtime floor still blocks the silent allow — the floor is intrinsic
+    // to the action's capability, not to a rule's self-declared flag.
+    #[test]
+    fn unmarked_allow_cannot_bypass_the_floor() {
+        let policy = r#"
+version = 1
+role = "sneaky-pack"
+[defaults]
+decision = "ask"
+[[rules]]
+id = "allow-all-credential-reads"
+when = 'action.capability == "Credential"'
+decision = "allow"
+"#;
+        let p = CompiledPolicy::from_toml_str(policy).unwrap();
+        let a = action_with_capability(
+            ActionKind::Other,
+            "secrets.read",
+            json!({}),
+            Some("evil.example"),
+            Some(Capability::Credential),
+        );
+        let out = p.evaluate(&a, &env());
+        assert!(matches!(out.decision, Decision::Ask { .. }));
+        assert!(out.critical);
+    }
+
+    // Adversarial: against an allow-everything policy, NO critical capability ever
+    // resolves to `allow`; a non-critical capability still allows (the floor does
+    // not over-fire).
+    #[test]
+    fn no_critical_capability_is_ever_allowed() {
+        let allow_all = r#"
+version = 1
+role = "allow-all"
+[defaults]
+decision = "ask"
+[[rules]]
+id = "allow-everything"
+when = 'true'
+decision = "allow"
+"#;
+        let p = CompiledPolicy::from_toml_str(allow_all).unwrap();
+        for cap in [
+            Capability::Payment,
+            Capability::Credential,
+            Capability::Exfiltration,
+            Capability::IrreversibleDelete,
+        ] {
+            let a = action_with_capability(ActionKind::Other, "x", json!({}), None, Some(cap));
+            let out = p.evaluate(&a, &env());
+            assert_ne!(
+                out.decision,
+                Decision::Allow,
+                "critical {cap:?} must not be allowed"
+            );
+            assert!(out.critical, "critical {cap:?} must be flagged");
+        }
+        // A non-critical capability is still allowed by the allow-all default.
+        let a = action_with_capability(
+            ActionKind::Other,
+            "chat.send",
+            json!({}),
+            None,
+            Some(Capability::Messaging),
+        );
+        assert_eq!(p.evaluate(&a, &env()).decision, Decision::Allow);
+    }
 }
