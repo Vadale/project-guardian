@@ -67,7 +67,11 @@ action while *omitting* the flag. The deterministic engine therefore also enforc
 is a critical category (money, credentials, exfiltration, irreversible deletion) can
 never resolve to `allow` — a would-be allow is floored to `ask` — regardless of any
 rule or pack. The floor is intrinsic to the action's capability, not to a rule flag.
-Maps to OWASP LLM03.
+**Coverage bound:** the floor keys off the action's *capability* tag, so its reach is
+only as complete as the adapter's capability tagging — an action surfaced as
+`Exec`/`Other` with no capability set is not floored (it still falls to the restrictive
+default / the `Exec` rules). Completing capability inference at the adapters, and
+optionally deriving criticality from `ActionKind` too, is tracked. Maps to OWASP LLM03.
 
 ### 5.5 Attack on Guardian itself
 Tamper with policy, steal brokered credentials, or forge the log. **Defense:**
