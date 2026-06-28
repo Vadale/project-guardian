@@ -5,7 +5,27 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 [Semantic Versioning](https://semver.org/) from 1.0 onward. Maintained by the
 `doc-writer` agent on every change (see `CLAUDE.md`).
 
-## [Unreleased] — design phase
+## [Unreleased]
+
+## [0.1.0] — 2026-06-28 — first tagged release
+The first public, versioned release. Working MVP across Phases 0–4: deterministic
+policy engine (CEL), structured action model, hash-chained signed audit log, MCP
+gateway, HTTP(S) MITM proxy with secret-exfiltration scanning, OS sandbox backstop
+(macOS/Linux), identity & token broker (OS keychain + caveats + signed packs +
+verifiable credentials), long-running daemon with a fail-closed human-approval
+queue over a `0o600` local control socket, the `guardian` CLI, and the ratatui TUI
+cockpit (approvals / activity archive / create-token). All seven hard invariants
+hold; quality gate green (fmt, clippy `-D warnings`, 173 tests, cargo-deny) on
+macOS/Linux + Windows CI.
+
+- **Distribution:** unsigned cross-platform CLI builds attached to the GitHub
+  Release on this tag (macOS aarch64+x86_64, Linux x86_64, Windows x86_64), plus
+  `cargo install`. **Code-signing is intentionally not enabled** — no certificate
+  secrets are needed to download and run from GitHub (see `docs/packaging.md`).
+- **Platform support:** macOS & Linux are tested; **Windows is experimental and
+  not yet tested end-to-end** (compiles + unit tests pass in CI; no sandbox backend
+  on Windows — `Exec` stays ask/deny, fail safe). See `docs/packaging.md`.
+- All Phase 0–4 work below is included in this release.
 
 ### Fixed — 2026-06-28 (whole-codebase milestone review)
 A full-system code-review pass (across Phases 0–4) found integration-seam drift
