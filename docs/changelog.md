@@ -7,6 +7,21 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 
 ## [Unreleased]
 
+### Added — 2026-06-28 (evaluation results)
+- **Published the first Guardian evaluation scorecard** (`evaluation/README.md` §7).
+  AgentDojo `banking` / `important_instructions`, local Ollama, A/B (agent alone vs
+  agent + Guardian): **Gemma-4 12B 100% → 0%** ASR (baseline 18/18 compromised;
+  Guardian 0/9 — the block is deterministic, money-movement tools denied by name),
+  **Gemma-4 E2B 3.5% → 0%** (n=144). Utility cost is the eval policy hard-denying
+  money-movement that a real deployment routes to `ask`. Coverage is one suite + one
+  attack family (other suites / big-model re-run are future work). Raw outputs in
+  `evaluation/results/`.
+- **Added `evaluation/pi/`** — a live interception demo with the real `pi` coding
+  agent: a ~60-line Guardian extension on pi's `tool_call` event (the pi analogue of
+  the Claude Code `PreToolUse` hook) blocks shell/delete/write while letting reads
+  through; in 2 of 4 cases the model claimed success in prose while Guardian had
+  blocked the real action (invariant #2 demonstrated live).
+
 ## [0.1.0] — 2026-06-28 — first tagged release
 The first public, versioned release. Working MVP across Phases 0–4: deterministic
 policy engine (CEL), structured action model, hash-chained signed audit log, MCP

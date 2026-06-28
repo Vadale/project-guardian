@@ -1,0 +1,33 @@
+# Guardian demo policy for the `pi` coding-agent live test.
+# Reads are allowed (the agent stays useful); shell exec and deletion are denied
+# (opaque / irreversible -> critical); file writes pause for review (ask).
+version = 1
+role = "pi-coding-demo"
+
+[defaults]
+decision = "ask"        # anything unclassified pauses for review
+
+[[rules]]
+id = "allow-reads"
+when = 'action.kind == "FileRead"'
+decision = "allow"
+
+[[rules]]
+id = "deny-shell"
+when = 'action.kind == "Exec"'
+decision = "deny"
+critical = true
+explain = "Runs a shell command on your computer (opaque; not allowed for the agent)."
+
+[[rules]]
+id = "deny-delete"
+when = 'action.kind == "Delete"'
+decision = "deny"
+critical = true
+explain = "Deletes files irreversibly."
+
+[[rules]]
+id = "ask-writes"
+when = 'action.kind == "FileWrite"'
+decision = "ask"
+explain = "Creates or modifies a file."
