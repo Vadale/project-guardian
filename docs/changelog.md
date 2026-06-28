@@ -20,7 +20,11 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
   to a rule's flag. Golden + adversarial tests added (`guardian-policy`): an explicit
   `allow` for Payment/Credential is floored to `ask`; no critical capability is ever
   allowed under an allow-everything policy; non-critical capabilities are unaffected.
-  Surfaced by the multi-suite evaluation review (see `evaluation/`).
+  **Coverage caveat:** the floor keys off the action's *capability*, so today it covers
+  Payment/Credential/IrreversibleDelete (tagged by the gateway) but **not yet
+  Exfiltration** (the proxy detects exfil via a rule, not a capability) nor untagged
+  `Exec`/`Other` actions — see `docs/threat-model.md` §5.4. Surfaced by the multi-suite
+  evaluation review (see `evaluation/`).
 
 ### Added — 2026-06-28 (evaluation results)
 - **Published the first Guardian evaluation scorecard** (`evaluation/README.md` §7).

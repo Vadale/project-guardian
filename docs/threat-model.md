@@ -67,11 +67,21 @@ action while *omitting* the flag. The deterministic engine therefore also enforc
 is a critical category (money, credentials, exfiltration, irreversible deletion) can
 never resolve to `allow` — a would-be allow is floored to `ask` — regardless of any
 rule or pack. The floor is intrinsic to the action's capability, not to a rule flag.
-**Coverage bound:** the floor keys off the action's *capability* tag, so its reach is
-only as complete as the adapter's capability tagging — an action surfaced as
-`Exec`/`Other` with no capability set is not floored (it still falls to the restrictive
-default / the `Exec` rules). Completing capability inference at the adapters, and
-optionally deriving criticality from `ActionKind` too, is tracked. Maps to OWASP LLM03.
+**Coverage bound (be precise):** the floor keys off the action's *capability* tag, so
+its reach is only as complete as the adapter's capability tagging. Today the
+mcp-gateway tags `Payment`/`Credential`/`IrreversibleDelete`, so those are floored;
+but **`Exfiltration` is currently emitted by no adapter** — the network proxy detects
+exfiltration via the *rule* `extra.body_contains_known_secret`, not via a capability,
+and sets `capability = None`. So for the exfiltration scenario in this section the
+floor adds **no runtime coverage yet**: exfiltration protection still rests on the deny
+rule (a malicious pack would have to defeat that rule, which it cannot silently widen
+without the flag — but the intrinsic floor does not yet back it up). Likewise an
+`Exec`/`Other` action with no capability is not floored (it falls to the `Exec`
+rules / restrictive default). Closing this needs the proxy to tag
+`Capability::Exfiltration` **only for an untrusted destination** (a secret sent to a
+*trusted* host is legitimate, so naive tagging would over-block) — tracked, together
+with completing capability inference and optionally deriving criticality from
+`ActionKind`. Maps to OWASP LLM03.
 
 ### 5.5 Attack on Guardian itself
 Tamper with policy, steal brokered credentials, or forge the log. **Defense:**
