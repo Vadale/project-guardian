@@ -8,6 +8,14 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 ## [Unreleased] — design phase
 
 ### Implemented — 2026-06-27 (Phase 4 — Hardening)
+- **Cross-platform IPC — Windows support (`guardian-daemon`, §9b.3)** — the daemon's
+  control socket (`serve` / `DaemonClient` / `DaemonRouter`) now runs on **Windows**
+  too. The Unix-domain-socket transport was replaced with the **`interprocess`**
+  crate's one local-socket API: a Unix domain socket on unix (the configured path), a
+  **named pipe** on Windows (derived from the socket file name). `mod server` is no
+  longer `#[cfg(unix)]`. A new **Windows CI job** (`cargo test` on `windows-latest`)
+  compiles the named-pipe path and exercises the IPC tests over a real pipe.
+  `deny.toml` allows `0BSD` (interprocess's permissive transitive deps).
 - **Packaging & release pipeline (Phase 4 / §9.3)** — a `v*`-tag GitHub Actions
   release workflow (`.github/workflows/release.yml`) builds the `guardian` CLI for
   macOS (aarch64 + x86_64), Linux (x86_64), and Windows (x86_64) and attaches the

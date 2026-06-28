@@ -653,8 +653,13 @@ The MVP cuts corners that a real product cannot. These make the existing core
       critical-category opt-in (today it can exempt a host from host-gated critical
       deny rules; mitigated for now by owner-only file perms + a startup log of the
       effective value).
-- [ ] 9b.3 **Cross-platform IPC.** Windows named pipe alongside the Unix socket
-      (via the `interprocess` crate) so the daemon/UI run on Windows too.
+- [x] 9b.3 **Cross-platform IPC.** Windows named pipe alongside the Unix socket
+      (via the `interprocess` crate) so the daemon/UI run on Windows too. **Done:**
+      the control socket (`serve`/`DaemonClient`) now uses one `interprocess`
+      local-socket API — Unix domain socket on unix (path), named pipe on Windows
+      (derived from the socket file name); `mod server` is no longer `cfg(unix)`. A
+      **Windows CI job** (`cargo test` on `windows-latest`) compiles the named-pipe
+      path and runs the IPC tests over a real pipe.
 - [~] 9b.4 **Real Checker backends.** **Done:** `HttpChecker` — POSTs the action to
       a configured HTTP endpoint (`checker_endpoint`/`GUARDIAN_CHECKER`) and parses
       an `Explanation`; daemon uses it when set, else the offline `StubChecker`

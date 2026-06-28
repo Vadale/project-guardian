@@ -185,22 +185,53 @@ impl guardian_mcp_gateway::Upstream for LocalToolsUpstream {
     }
 }
 
-/// Local control socket: a newline-delimited JSON protocol over a Unix socket,
-/// exposing `call` / `pending` / `respond` / `verify_audit`. Unix-only for now
-/// (Windows named-pipe support is a follow-up).
-#[cfg(unix)]
+/// Local control socket: a newline-delimited JSON protocol over a **cross-platform
+/// local socket** (Unix domain socket on unix, named pipe on Windows, via the
+/// `interprocess` crate — §9b.3), exposing `call` / `pending` / `respond` /
+/// `verify_audit`.
 mod server {
+    use std::io;
     use std::path::Path;
     use std::sync::Arc;
 
     use guardian_checker::Explanation;
     use guardian_core::{ActionKind, Capability};
     use guardian_mcp_gateway::{Gateway, GatewayOutcome, ToolCall, ToolRouter};
+    use interprocess::local_socket::tokio::prelude::*;
+    use interprocess::local_socket::{ListenerOptions, Name};
     use serde::{Deserialize, Serialize};
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-    use tokio::net::UnixListener;
+
+    #[cfg(not(windows))]
+    use interprocess::local_socket::GenericFilePath;
+    #[cfg(windows)]
+    use interprocess::local_socket::GenericNamespaced;
 
     use crate::{ApprovalQueue, ApprovalResponse};
+
+    /// Build the local-socket name from a path: the filesystem socket path on unix,
+    /// and a `\\.\pipe\<file-name>` named pipe on Windows (derived from the path's
+    /// file name). Borrows `path`, so it lives until the listener/stream is built.
+    fn socket_name(path: &Path) -> io::Result<Name<'_>> {
+        #[cfg(windows)]
+        {
+            let stem = path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("guardian");
+            stem.to_ns_name::<GenericNamespaced>()
+        }
+        #[cfg(not(windows))]
+        {
+            path.as_os_str().to_fs_name::<GenericFilePath>()
+        }
+    }
+
+    /// Connect a client stream to the daemon's local socket.
+    async fn connect_stream(path: &Path) -> io::Result<interprocess::local_socket::tokio::Stream> {
+        let name = socket_name(path)?;
+        interprocess::local_socket::tokio::Stream::connect(name).await
+    }
 
     /// A client request (one JSON object per line).
     #[derive(Debug, Deserialize)]
@@ -285,10 +316,13 @@ mod server {
         gateway: Arc<Gateway>,
         queue: Arc<ApprovalQueue>,
     ) -> std::io::Result<()> {
+        // On unix, clear a stale socket file so re-binding succeeds.
+        #[cfg(not(windows))]
         let _ = std::fs::remove_file(path);
-        let listener = UnixListener::bind(path)?;
+        let name = socket_name(path)?;
+        let listener = ListenerOptions::new().name(name).create_tokio()?;
         loop {
-            let (stream, _) = listener.accept().await?;
+            let stream = listener.accept().await?;
             let gateway = gateway.clone();
             let queue = queue.clone();
             tokio::spawn(async move {
@@ -298,11 +332,11 @@ mod server {
     }
 
     async fn handle_connection(
-        stream: tokio::net::UnixStream,
+        stream: interprocess::local_socket::tokio::Stream,
         gateway: Arc<Gateway>,
         queue: Arc<ApprovalQueue>,
     ) -> std::io::Result<()> {
-        let (read_half, mut write_half) = stream.into_split();
+        let (read_half, mut write_half) = stream.split();
         let mut lines = BufReader::new(read_half).lines();
         while let Some(line) = lines.next_line().await? {
             if line.trim().is_empty() {
@@ -442,8 +476,8 @@ mod server {
 
         /// Send one request line and read one response line.
         async fn rpc(&self, request: &str) -> std::io::Result<serde_json::Value> {
-            let stream = tokio::net::UnixStream::connect(&self.path).await?;
-            let (read_half, mut write_half) = stream.into_split();
+            let stream = connect_stream(&self.path).await?;
+            let (read_half, mut write_half) = stream.split();
             write_half
                 .write_all(format!("{request}\n").as_bytes())
                 .await?;
@@ -583,7 +617,6 @@ mod server {
         use guardian_checker::StubChecker;
         use guardian_mcp_gateway::Upstream;
         use guardian_policy::{CompiledPolicy, EvalEnv};
-        use tokio::net::UnixStream;
 
         use crate::QueueApprover;
 
@@ -637,8 +670,10 @@ decision = "ask"
             tokio::spawn(async move {
                 let _ = serve(&serve_path, gateway, queue).await;
             });
+            // Wait until the server accepts connections (cross-platform: a named pipe
+            // has no filesystem presence to poll, so retry connecting).
             for _ in 0..200 {
-                if path.exists() {
+                if connect_stream(&path).await.is_ok() {
                     break;
                 }
                 tokio::time::sleep(Duration::from_millis(5)).await;
@@ -648,8 +683,8 @@ decision = "ask"
 
         /// Send one request line on a fresh connection and return one response line.
         async fn rpc(path: &Path, request: &str) -> String {
-            let stream = UnixStream::connect(path).await.unwrap();
-            let (read_half, mut write_half) = stream.into_split();
+            let stream = connect_stream(path).await.unwrap();
+            let (read_half, mut write_half) = stream.split();
             write_half
                 .write_all(format!("{request}\n").as_bytes())
                 .await
@@ -790,7 +825,6 @@ decision = "ask"
     }
 }
 
-#[cfg(unix)]
 pub use server::{serve, DaemonClient, DaemonRouter, PendingView, Request, Response};
 
 #[cfg(test)]
