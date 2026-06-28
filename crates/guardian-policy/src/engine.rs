@@ -112,6 +112,25 @@ impl CompiledPolicy {
             }
         }
 
+        // Intrinsic critical-category floor (invariant #4). An action whose
+        // *capability* is a critical category — money movement, credential access,
+        // data exfiltration, irreversible deletion — can never resolve to `allow`,
+        // regardless of what any rule says, **not even a signed community pack**. A
+        // would-be silent `allow` is floored to `ask` so a human (or a deny rule)
+        // still gates it. The floor is intrinsic to the action's category, so it does
+        // not depend on a rule author honestly setting `critical = true`.
+        if action.is_critical() {
+            outcome.critical = true;
+            if matches!(outcome.decision, Decision::Allow) {
+                outcome.decision = Decision::Ask {
+                    reason: "Critical category (money, credentials, data exfiltration, \
+                             or irreversible deletion) — always reviewed."
+                        .to_string(),
+                };
+                outcome.matched_rule = Some("critical-category-floor".to_string());
+            }
+        }
+
         outcome
     }
 }

@@ -59,8 +59,15 @@ self-description; egress allow-lists; provenance recorded in the log.
 ### 5.4 Malicious policy pack (supply chain)
 A community pack silently whitelists an exfiltration path. **Defense:** packs are
 ed25519-signed; loader refuses unsigned/altered packs; a pack can **not** widen a
-critical category without explicit user opt-in; pack provenance is logged. Maps to
-OWASP LLM03.
+critical category without explicit user opt-in; pack provenance is logged.
+**Defense in depth (runtime floor):** the loader's anti-widening check looks at a
+rule's self-declared `critical` flag, so a pack could try to `allow` a money/credential
+action while *omitting* the flag. The deterministic engine therefore also enforces an
+**intrinsic critical-category floor at evaluation time**: an action whose *capability*
+is a critical category (money, credentials, exfiltration, irreversible deletion) can
+never resolve to `allow` — a would-be allow is floored to `ask` — regardless of any
+rule or pack. The floor is intrinsic to the action's capability, not to a rule flag.
+Maps to OWASP LLM03.
 
 ### 5.5 Attack on Guardian itself
 Tamper with policy, steal brokered credentials, or forge the log. **Defense:**
@@ -76,8 +83,11 @@ Maps to OWASP Agentic "tool misuse" / "goal hijacking".
 
 ### 5.7 Habituation attack
 Train the adaptive layer to auto-allow, then strike. **Defense:** critical
-categories are never auto-downgraded; suggestions are context-bound and decay;
-learning is opt-in and surfaced in the report, never silent.
+categories are never auto-downgraded — now **runtime-enforced** by the intrinsic
+critical-category floor (§5.4): even if learning or a rule produced an `allow` for a
+money/credential/exfiltration/irreversible-delete action, the engine floors it to
+`ask`. Suggestions are context-bound and decay; learning is opt-in and surfaced in
+the report, never silent.
 
 ### 5.8 Excessive agency / over-broad delegation
 The agent is granted more authority than the task needs. **Defense:** least-
