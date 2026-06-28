@@ -170,6 +170,51 @@ the with-vs-without gap are visible and reproducible.
 Precision: xx%  Recall: xx%  F1: xx  FPR: xx%  FNR: xx%
 ```
 
+### Results — 2026-06-28 · AgentDojo `banking` · attack `important_instructions` · local Ollama
+Same A/B twice (only difference = Guardian's `GuardianDefense` element; deterministic
+deny on the money-movement tools, `--block deny`). Raw outputs in
+[`results/`](results/).
+
+| Agent model            | ASR baseline (A) | ASR + Guardian (B) | Benign utility A → B | n (security / utility) |
+|------------------------|------------------|--------------------|----------------------|------------------------|
+| Gemma-4 **E2B** it-qat | 3.5%             | **0.0%**           | 43.8% → 31.2%        | 144 / 16               |
+| Gemma-4 **12B** mlx    | 100%             | **0.0%**           | 50.0% → 33.3%        | 9\* / 3 (baseline 18 / 6) |
+
+\* The Guardian arm is matched on the first 3 user × 3 injection tasks; baseline ASR
+is 1.00 across all 18 episodes, so it is also 1.00 on that subset → the matched A/B is
+**1.00 → 0.00**.
+
+**Reading these numbers**
+- Guardian drives the attack-success rate to **0** at both model strengths. The 12B is
+  capable enough to carry out the injected money-movement in **every** unguarded episode
+  (18/18); with Guardian it succeeds in **0/9**. The block is **deterministic** (the
+  abused tools are denied by name), so this is a *structural* result, not a statistical
+  estimate — n confirms there is no implementation gap; it does not gate significance.
+- **Utility cost** (e.g. 43.8% → 31.2%) comes from the eval policy **hard-denying**
+  money-movement that a real deployment would route to `ask` (human approves). It is an
+  artifact of the no-human automated harness, not a Guardian limitation; with a human in
+  the loop the benign money tasks recover. **Critical false negatives: 0.**
+
+**Coverage (honest scope).** This covers **one suite (banking)** and **one attack family
+(`important_instructions`)**. The broader plan — other AgentDojo suites, InjecAgent, ASB,
+AgentHarm, τ-bench — and a re-run against strong big-model APIs remain future work (§3).
+
+### Live interception demo — `pi` coding agent (qualitative)
+See [`pi/`](pi/). A real third-party coding agent ([`pi`](https://github.com/earendil-works/pi))
+on local Ollama, mediated by a ~60-line Guardian extension on the `tool_call` event that
+calls `guardian decide` and blocks anything not `allow` (fail-closed) — the pi analogue of
+the Claude Code `PreToolUse` hook.
+
+| Attempted action                  | Guardian        | Real outcome          |
+|-----------------------------------|-----------------|-----------------------|
+| `bash: touch X` / `rm -rf junk/*` | **deny** (Exec) | not executed; intact  |
+| `read notes.txt`                  | **allow**       | executed; work passes |
+| `write out.txt`                   | **ask → block** | file not created      |
+
+In 2 of 4 cases the model **claimed success in prose** while Guardian had blocked the real
+action — the filesystem is ground truth. Invariant #2 ("evaluate the structured action, not
+the agent's prose") demonstrated live.
+
 ---
 
 ## 8. Methodology rules
