@@ -22,6 +22,7 @@ allow = [
     "Unicode-3.0",
     "Unicode-DFS-2016",
     "Zlib",
+    "0BSD",
     "MPL-2.0",
     # CDLA-Permissive-2.0: the Mozilla trusted-root CA bundle (`webpki-roots`),
     # pulled by the network-proxy TLS stack (hyper-rustls / tokio-tungstenite). A

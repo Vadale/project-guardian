@@ -62,7 +62,9 @@ a follow-up.)
   internal mutex is never held across an `.await`.
 
 ## Control socket (IPC)
-`serve(path, gateway, queue)` runs a Unix-socket server speaking
+`serve(path, gateway, queue)` runs a **cross-platform local-socket** server (via the
+`interprocess` crate, §9b.3): a **Unix domain socket** on unix (the configured path)
+and a **named pipe** on Windows (derived from the socket file name). It speaks
 **newline-delimited JSON**. One request object per line; one response per line.
 Each connection is handled in its own task, so a `call` blocked on approval never
 prevents a `respond` on another connection from resolving it.
@@ -73,8 +75,8 @@ approval and block until the cockpit resolves it; used by an external proxy to
 borrow this daemon's queue + cockpit), `verify_audit`. Responses (`{"result":
 ...}`): `outcome` (status allowed/blocked/upstream_error + detail), `pending`
 (items), `responded` (ok), `approval` (approved), `audit` (entries, intact),
-`error` (message). `GUARDIAN_SOCK` overrides the socket path. Unix-only for now;
-Windows named-pipe support is a follow-up.
+`error` (message). `GUARDIAN_SOCK` overrides the socket path. Runs on unix **and
+Windows** (a Windows CI job exercises the named-pipe path).
 
 ## Tests
 Unit: approve, deny, fail-closed timeout, unknown-id, `QueueApprover` routing.

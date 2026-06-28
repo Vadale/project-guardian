@@ -28,6 +28,17 @@ jobs:
       - name: Test
         run: cargo test --all --all-features
 
+  # Cross-platform build/test on Windows (§9b.3): compiles the named-pipe IPC path
+  # and runs the daemon's IPC tests over a real Windows named pipe.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test (daemon IPC + workspace)
+        run: cargo test --workspace --all-features
+
   deny:
     runs-on: ubuntu-latest
     steps:
