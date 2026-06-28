@@ -1153,7 +1153,7 @@ dependencies = [
 
 [[package]]
 name = "guardian-audit"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "blake3",
  "ed25519-dalek",
@@ -1167,7 +1167,7 @@ dependencies = [
 
 [[package]]
 name = "guardian-broker"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
  "getrandom 0.2.17",
@@ -1181,7 +1181,7 @@ dependencies = [
 
 [[package]]
 name = "guardian-checker"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "guardian-core",
@@ -1194,7 +1194,7 @@ dependencies = [
 
 [[package]]
 name = "guardian-cli"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1217,7 +1217,7 @@ dependencies = [
 
 [[package]]
 name = "guardian-core"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1225,7 +1225,7 @@ dependencies = [
 
 [[package]]
 name = "guardian-daemon"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "guardian-audit",
@@ -1245,7 +1245,7 @@ dependencies = [
 
 [[package]]
 name = "guardian-mcp-gateway"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "guardian-audit",
@@ -1259,7 +1259,7 @@ dependencies = [
 
 [[package]]
 name = "guardian-policy"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "blake3",
  "cel-interpreter",
@@ -1275,7 +1275,7 @@ dependencies = [
 
 [[package]]
 name = "guardian-proxy"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1296,7 +1296,7 @@ dependencies = [
 
 [[package]]
 name = "guardian-sandbox"
-version = "0.0.0"
+version = "0.1.0"
 
 [[package]]
 name = "h2"

@@ -1,7 +1,21 @@
 # Packaging & release (Phase 4 — §9.3)
 
-How Guardian is distributed. **Code-signing is optional** — Guardian ships fine
-unsigned on GitHub; signing only removes the OS "unverified developer" warning.
+How Guardian is distributed. **Code-signing is optional and intentionally NOT
+enabled** — Guardian ships fine unsigned on GitHub; signing only removes the OS
+"unverified developer" warning. There are no certificate secrets in the repo or the
+release workflow, by design (see *Optional: signing* below).
+
+## Platform support (v0.1.0)
+- **macOS & Linux — supported.** Developed and tested here; the proxy, daemon
+  control socket (Unix domain socket), sandbox backstop, keychain, and TUI are
+  exercised on these platforms.
+- **Windows — experimental / best-effort, NOT tested end-to-end.** The whole
+  workspace **compiles** and the **unit-test suite passes** on the `windows-latest`
+  CI runner (including the named-pipe IPC tests), but Guardian has **not** been run
+  end-to-end on real Windows hardware. The OS sandbox backstop (`guardian-sandbox`)
+  has **no Windows backend** (it reports "no sandbox available" and the policy keeps
+  `Exec` at ask/deny — fail safe). Treat Windows as unverified until a real-world
+  pass is done. Bug reports from Windows users are welcome.
 
 ## You do NOT need certificates to ship
 The supported, zero-cost path for an open-source tool:
@@ -60,8 +74,10 @@ intentionally **out** of the repo. Skip this until/unless you want the warnings 
   GPG key; the AppImage can be GPG-signed.
 
 ### Status
-**Releasing is ready now** — unsigned cross-platform CLI builds (`v*` tag) +
-`cargo install` + the Tauri bundler config are all in place. Code signing /
-notarization is the only *optional* extra: it just removes the OS warning and needs
-paid certificates as CI secrets; the commands above are ready to wire in if/when you
-decide you want it.
+**v0.1.0 ships unsigned, by design.** Unsigned cross-platform CLI builds (`v*` tag)
++ `cargo install` + the Tauri bundler config are all in place. Code signing /
+notarization is **deliberately left disabled**: no certificate secrets exist in the
+repo or the release workflow, and none are required to download and run Guardian
+from GitHub. Signing is an optional, later polish that only removes the OS
+"unverified developer" warning and needs paid certificates as CI secrets; the
+commands above are ready to wire in if/when the maintainer obtains them.
