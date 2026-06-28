@@ -58,12 +58,12 @@ decision = "deny"
 critical = true
 explain = "Looks like a destructive or remote-code-execution shell command."
 
-# NOTE: the next two rules need request-body inspection / credential capability,
-# which the network proxy (Phase 2) provides. Until then they cannot match, so
-# such actions fall through to the restrictive default (ask) — fail safe, not open.
+# The network proxy (Phase 2) buffers request bodies and sets
+# `action.context.extra.body_contains_known_secret` when an outbound body carries
+# one of the user's stored secrets — this rule blocks that exfiltration.
 [[rules]]
 id = "data-exfiltration"
-when = 'action.kind == "HttpRequest" && action.args.method == "POST" && action.context.body.contains_secret && !(action.context.host in trusted_hosts)'
+when = 'action.context.extra.body_contains_known_secret == true && !(action.context.host in trusted_hosts)'
 decision = "deny"
 critical = true
 explain = "Tried to send a secret (password, key, or token) to an untrusted site."

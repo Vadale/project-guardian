@@ -385,6 +385,47 @@ cap = { count_max = 10 }
     }
 
     #[test]
+    fn currency_cap_requires_a_matching_currency() {
+        let policy = r#"
+version = 1
+role = "t"
+[defaults]
+decision = "ask"
+[[rules]]
+id = "pay"
+when = 'action.kind == "Other"'
+decision = "allow"
+cap = { amount_max = 200.0, currency = "EUR" }
+"#;
+        let p = CompiledPolicy::from_toml_str(policy).unwrap();
+        // In-currency and under the limit → allowed.
+        let eur = action(
+            ActionKind::Other,
+            "pay",
+            json!({ "amount": 150.0, "currency": "EUR" }),
+            None,
+        );
+        assert_eq!(p.evaluate(&eur, &env()).decision, Decision::Allow);
+        // A different currency can't be checked against an EUR limit → fail safe (ask).
+        let btc = action(
+            ActionKind::Other,
+            "pay",
+            json!({ "amount": 1.0, "currency": "BTC" }),
+            None,
+        );
+        assert!(matches!(
+            p.evaluate(&btc, &env()).decision,
+            Decision::Ask { .. }
+        ));
+        // Missing currency on a currency-scoped cap → fail safe (ask).
+        let none = action(ActionKind::Other, "pay", json!({ "amount": 10.0 }), None);
+        assert!(matches!(
+            p.evaluate(&none, &env()).decision,
+            Decision::Ask { .. }
+        ));
+    }
+
+    #[test]
     fn evaluate_is_independent_across_calls() {
         // The shared base context (built once per CompiledPolicy) must not leak a
         // call's per-action variables into the next: each outcome depends only on

@@ -79,7 +79,7 @@ explain = "Deletes many items at once."
 
 [[rules]]
 id = "data-exfiltration"
-when = 'action.kind == "HttpRequest" && action.args.method == "POST" && action.context.body.contains_secret && !(action.context.host in trusted_hosts)'
+when = 'action.context.extra.body_contains_known_secret == true && !(action.context.host in trusted_hosts)'
 decision = "deny"
 critical = true
 explain = "Tried to send a secret (password, key, or token) to an untrusted site."

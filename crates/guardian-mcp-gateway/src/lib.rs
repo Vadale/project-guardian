@@ -214,7 +214,9 @@ impl Gateway {
             let decision = Decision::Deny {
                 reason: reason.clone(),
             };
-            self.record(
+            // A hard deny is blocked regardless, so a failed audit write here can't
+            // fail open — record best-effort.
+            let _ = self.record(
                 &action,
                 &decision,
                 Some("self-protection".to_string()),
@@ -241,7 +243,7 @@ impl Gateway {
             }
         };
 
-        self.record(
+        let recorded = self.record(
             &action,
             &outcome.decision,
             outcome.matched_rule.clone(),
@@ -249,6 +251,14 @@ impl Gateway {
             user_response,
             outcome.critical,
         );
+
+        // Fail closed: never forward an allowed action we couldn't durably record
+        // (invariant 5 + 7), matching the proxy's behavior.
+        if proceed && !recorded {
+            return GatewayOutcome::Blocked(
+                "Guardian audit log unavailable; action blocked (fail-closed).".to_string(),
+            );
+        }
 
         if proceed {
             match self.upstream.forward(&call).await {
@@ -289,6 +299,9 @@ impl Gateway {
             .unwrap_or_default()
     }
 
+    /// Record a decision. Returns `false` if it could not be durably persisted
+    /// (poisoned lock or DB error) so the caller can **fail closed** on the critical
+    /// path rather than forward an unlogged allow (invariant 5 + 7).
     #[allow(clippy::too_many_arguments)]
     fn record(
         &self,
@@ -298,7 +311,7 @@ impl Gateway {
         explanation: Option<&Explanation>,
         user_response: Option<String>,
         critical: bool,
-    ) {
+    ) -> bool {
         let entry = AuditEntry::for_decision(
             action,
             decision,
@@ -307,9 +320,9 @@ impl Gateway {
             user_response,
             critical,
         );
-        // The request path must not panic if the log is briefly unavailable.
-        if let Ok(mut log) = self.audit.lock() {
-            let _ = log.append(&entry);
+        match self.audit.lock() {
+            Ok(mut log) => log.append(&entry).is_ok(),
+            Err(_) => false,
         }
     }
 
