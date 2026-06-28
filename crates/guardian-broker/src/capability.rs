@@ -44,7 +44,11 @@ pub struct Caveats {
     pub not_after_ms: Option<i64>,
     /// Allowed destination hosts (normalized, lowercase). Empty = any host.
     pub allowed_hosts: Vec<String>,
-    /// Maximum amount this capability may authorize.
+    /// Maximum amount this capability may authorize. Enforced where the action
+    /// carries an `amount` (the MCP/tool path); on the network proxy, an amount
+    /// isn't parsed from arbitrary HTTP, so `max_amount` is **not** enforced there
+    /// (the policy's `cap`/host rules and the read-only allowlist are the proxy
+    /// control). Tracked: parse an amount or fail closed on the proxy when set.
     pub max_amount: Option<f64>,
     /// If true (the default), a **critical** action requires a *fresh* approval —
     /// a cached/automatic grant is never enough.

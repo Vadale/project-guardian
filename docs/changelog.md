@@ -7,6 +7,27 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 
 ## [Unreleased] — design phase
 
+### Fixed — 2026-06-28 (whole-codebase milestone review)
+A full-system code-review pass (across Phases 0–4) found integration-seam drift
+between independently-correct parts:
+- **Fix (blocker): the shipped policies' exfiltration rule was dead.**
+  `policies/default/{personal-assistant,coding-agent}.toml` gated exfiltration on
+  `action.context.body.contains_secret` — a field that doesn't exist — while the
+  proxy emits `action.context.extra.body_contains_known_secret`. The rule never
+  fired (it failed *safe*, to the ask/deny default, not open, but the advertised
+  control was inert and the body scan wasted). Both rules now use the path the proxy
+  emits, with a **golden test driving the shipped policy through the proxy** so the
+  seam can't drift again.
+- **Fix: `Cap.currency` is now enforced.** A currency-scoped cap (e.g. `amount_max =
+  200, currency = "EUR"`) previously ignored `currency`; a different/missing currency
+  now fails safe (escalates to `ask`) instead of passing the amount check.
+- **Fix: the MCP gateway now fails closed on an audit-write failure** (matching the
+  proxy) — it no longer forwards an allowed action it couldn't durably record
+  (invariant 5 + 7).
+- **Documented:** the broker `max_amount` caveat is a no-op on the network-proxy path
+  (no amount in arbitrary HTTP) — enforced on the MCP/tool path; tracked to parse or
+  fail-closed later. The review confirmed all seven hard invariants otherwise hold.
+
 ### Implemented — 2026-06-28 (milestone simplify / perf / UX pass)
 Multi-angle cleanup at the Phase-4 milestone (cleanup + efficiency + correctness +
 security + UX reviews); behavior-preserving, gate green (170 tests).

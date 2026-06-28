@@ -186,6 +186,14 @@ fn cap_violated(cap: &Cap, action: &Action) -> bool {
             None => return true,
         }
     }
+    // A currency-scoped cap (e.g. "≤200 EUR") only bounds amounts in that currency;
+    // a missing or different currency can't be verified against the limit → fail safe.
+    if let Some(want) = &cap.currency {
+        match action.args.get("currency").and_then(|v| v.as_str()) {
+            Some(got) if got.eq_ignore_ascii_case(want) => {}
+            _ => return true,
+        }
+    }
     false
 }
 
