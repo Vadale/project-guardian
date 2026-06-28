@@ -52,7 +52,8 @@ green path.
 The hot path is `CompiledPolicy::evaluate` (pure CEL evaluation, no I/O). Measured on
 an Apple-silicon laptop, release build, a 2-rule HTTP policy:
 
-> **≈ 3.9 µs per decision** (200 000 iterations).
+> **≈ 2.6 µs per decision** (200 000 iterations; the CEL standard-function registry
+> is built once per `CompiledPolicy`, not per call).
 
 So Guardian adds **single-digit microseconds** to an allow/deny decision — far below
 any human-perceptible or network-relevant threshold. The only places latency grows

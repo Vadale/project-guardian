@@ -37,6 +37,10 @@ pub struct CompiledPolicy {
     policy: Policy,
     /// Parallel to `policy.rules`.
     programs: Vec<Program>,
+    /// The CEL standard-function registry, built **once** at compile time. Each
+    /// `evaluate` derives a cheap child scope from it (adding only the per-action
+    /// variables) instead of re-registering every standard function per call.
+    base: Context<'static>,
 }
 
 impl CompiledPolicy {
@@ -52,7 +56,11 @@ impl CompiledPolicy {
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(Self { policy, programs })
+        Ok(Self {
+            policy,
+            programs,
+            base: Context::default(),
+        })
     }
 
     /// Parse, validate, and compile a policy from TOML in one step.
@@ -66,7 +74,7 @@ impl CompiledPolicy {
 
     /// Evaluate `action` against the policy. Pure and deterministic.
     pub fn evaluate(&self, action: &Action, env: &EvalEnv) -> EvalOutcome {
-        let ctx = build_context(action, env);
+        let ctx = build_context(&self.base, action, env);
 
         // Start from the (always restrictive) default; rules override on match.
         let mut outcome = EvalOutcome {
@@ -108,10 +116,11 @@ impl CompiledPolicy {
     }
 }
 
-/// Build the CEL evaluation context from the action and environment. The action
-/// is exposed as its JSON form under `action`.
-fn build_context(action: &Action, env: &EvalEnv) -> Context<'static> {
-    let mut ctx = Context::default();
+/// Build the CEL evaluation context from the action and environment, as a cheap
+/// **child scope** of `base` (which already holds the standard-function registry).
+/// The action is exposed as its JSON form under `action`.
+fn build_context<'a>(base: &'a Context<'a>, action: &Action, env: &EvalEnv) -> Context<'a> {
+    let mut ctx = base.new_inner_scope();
     let action_json = serde_json::to_value(action).unwrap_or(serde_json::Value::Null);
     // `add_variable` only fails if the value is not serializable; ours always is.
     let _ = ctx.add_variable("action", action_json);
