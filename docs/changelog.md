@@ -7,6 +7,15 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 
 ## [Unreleased] — design phase
 
+### Implemented — 2026-06-28 (cockpit: create a token)
+- **Create-a-token form in the cockpit (`guardian ui`)** — press **`n`** to open a
+  form: enter the **site/host** and its **secret**; on save the secret is stored in
+  the **OS keychain** (`guardian_broker::keychain`) so the agent never sees it, and
+  the proxy can later inject it for that host (`--keychain <host>`). The secret field
+  is **masked** (never echoed); `Tab` switches fields, `Enter` saves, `Esc` cancels.
+  Local operation (no daemon needed). 3 render/logic tests (masking, field editing,
+  submit validation).
+
 ### Implemented — 2026-06-28 (cockpit: activity archive)
 - **Activity archive in the cockpit (`guardian ui` + daemon `history`)** — the
   terminal cockpit gains a second screen (toggle with **Tab**) showing the **archive

@@ -45,6 +45,41 @@ enum View {
     Approvals,
     /// The activity archive: what the agent did, where it went (host), the rule.
     History,
+    /// A form to create a token for a site (stored in the OS keychain).
+    NewToken,
+}
+
+/// Which field of the new-token form is being edited.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Field {
+    Target,
+    Secret,
+}
+
+/// State of the "create a token" form. The secret is never echoed (shown masked)
+/// and, on submit, is stored in the OS keychain — the agent never sees it.
+struct TokenForm {
+    target: String,
+    secret: String,
+    field: Field,
+    message: String,
+}
+
+impl TokenForm {
+    fn new() -> Self {
+        Self {
+            target: String::new(),
+            secret: String::new(),
+            field: Field::Target,
+            message: String::new(),
+        }
+    }
+    fn active(&mut self) -> &mut String {
+        match self.field {
+            Field::Target => &mut self.target,
+            Field::Secret => &mut self.secret,
+        }
+    }
 }
 
 struct App {
@@ -60,6 +95,8 @@ struct App {
     view: View,
     /// Recent decisions for the History view (most-recent-last from the daemon).
     history: Vec<HistoryView>,
+    /// The new-token form state (used on the NewToken screen).
+    form: TokenForm,
 }
 
 /// Entry point for `guardian ui`. With `demo`, shows sample actions and never
@@ -87,6 +124,7 @@ async fn run_loop(terminal: &mut DefaultTerminal, client: &DaemonClient, demo: b
         demo,
         view: View::Approvals,
         history: if demo { demo_history() } else { Vec::new() },
+        form: TokenForm::new(),
     };
     let mut events = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_millis(400));
@@ -140,6 +178,10 @@ async fn refresh(app: &mut App, client: &DaemonClient) {
 
 async fn handle_event(event: Event, app: &mut App, client: &DaemonClient) {
     match event {
+        // The new-token form captures all keys as text input.
+        Event::Key(key) if key.kind == KeyEventKind::Press && app.view == View::NewToken => {
+            handle_form_key(app, key.code);
+        }
         Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
             KeyCode::Char('q') | KeyCode::Esc => app.quit = true,
             KeyCode::Char('j') | KeyCode::Down => move_selection(app, 1),
@@ -148,10 +190,14 @@ async fn handle_event(event: Event, app: &mut App, client: &DaemonClient) {
             KeyCode::Char('d') => resolve_selected(app, client, false).await,
             KeyCode::Char('p') => panic_all(app, client).await,
             KeyCode::Char('r') => refresh(app, client).await,
+            KeyCode::Char('n') => {
+                app.view = View::NewToken;
+                app.form = TokenForm::new();
+            }
             KeyCode::Tab => {
                 app.view = match app.view {
-                    View::Approvals => View::History,
                     View::History => View::Approvals,
+                    _ => View::History,
                 };
                 refresh(app, client).await;
             }
@@ -176,6 +222,48 @@ async fn handle_event(event: Event, app: &mut App, client: &DaemonClient) {
             }
         }
         _ => {}
+    }
+}
+
+/// Handle a keystroke on the new-token form. Pure + local (storing a secret is a
+/// local keychain op, no daemon needed).
+fn handle_form_key(app: &mut App, code: KeyCode) {
+    match code {
+        KeyCode::Esc => app.view = View::Approvals,
+        KeyCode::Tab => {
+            app.form.field = match app.form.field {
+                Field::Target => Field::Secret,
+                Field::Secret => Field::Target,
+            };
+        }
+        KeyCode::Backspace => {
+            app.form.active().pop();
+        }
+        KeyCode::Enter => submit_token(app),
+        KeyCode::Char(c) => app.form.active().push(c),
+        _ => {}
+    }
+}
+
+/// Store the form's secret for its target in the OS keychain (the agent never sees
+/// it). Validates both fields are present; reports the result in the form message.
+fn submit_token(app: &mut App) {
+    let target = app.form.target.trim().to_string();
+    if target.is_empty() || app.form.secret.is_empty() {
+        app.form.message = "enter both a site (host) and a secret".to_string();
+        return;
+    }
+    if app.demo {
+        app.form = TokenForm::new();
+        app.form.message = format!("(demo) would store a token for {target}");
+        return;
+    }
+    match guardian_broker::keychain::store(&target, &app.form.secret) {
+        Ok(()) => {
+            app.form = TokenForm::new();
+            app.form.message = format!("stored a token for {target} in the keychain");
+        }
+        Err(e) => app.form.message = format!("error: {e}"),
     }
 }
 
@@ -319,24 +407,35 @@ fn draw(frame: &mut Frame, app: &mut App) {
 
     draw_body(frame, chunks[1], app);
 
-    // Footer key bar.
-    let footer = Paragraph::new(Line::from(vec![
-        key(" j/k ", DARK_GREEN),
-        Span::raw(" move  "),
-        key(" a ", BRIGHT_GREEN),
-        Span::raw(" allow  "),
-        key(" d ", BRIGHT_RED),
-        Span::raw(" deny  "),
-        key(" p ", BRIGHT_RED),
-        Span::raw(" panic  "),
-        key(" r ", DARK_GREEN),
-        Span::raw(" refresh  "),
-        key(" Tab ", DARK_GREEN),
-        Span::raw(" approvals/archive  "),
-        key(" q ", DARK_GREEN),
-        Span::raw(" quit"),
-    ]))
-    .style(Style::new().bg(Color::Black));
+    // Footer key bar — the form captures keystrokes, so it shows its own hints.
+    let footer_line = if app.view == View::NewToken {
+        Line::from(vec![
+            key(" Tab ", DARK_GREEN),
+            Span::raw(" field  "),
+            key(" Enter ", BRIGHT_GREEN),
+            Span::raw(" save  "),
+            key(" Esc ", DARK_GREEN),
+            Span::raw(" cancel"),
+        ])
+    } else {
+        Line::from(vec![
+            key(" j/k ", DARK_GREEN),
+            Span::raw(" move  "),
+            key(" a ", BRIGHT_GREEN),
+            Span::raw(" allow  "),
+            key(" d ", BRIGHT_RED),
+            Span::raw(" deny  "),
+            key(" p ", BRIGHT_RED),
+            Span::raw(" panic  "),
+            key(" n ", BRIGHT_GREEN),
+            Span::raw(" new token  "),
+            key(" Tab ", DARK_GREEN),
+            Span::raw(" archive  "),
+            key(" q ", DARK_GREEN),
+            Span::raw(" quit"),
+        ])
+    };
+    let footer = Paragraph::new(footer_line).style(Style::new().bg(Color::Black));
     frame.render_widget(footer, chunks[2]);
 }
 
@@ -361,7 +460,61 @@ fn draw_body(frame: &mut Frame, area: Rect, app: &mut App) {
     match app.view {
         View::Approvals => draw_approvals(frame, area, app),
         View::History => draw_history(frame, area, app),
+        View::NewToken => draw_new_token(frame, area, app),
     }
+}
+
+/// The "create a token" form: a site (host) field and a masked secret field. On
+/// submit the secret is stored in the OS keychain; the agent never sees it.
+fn draw_new_token(frame: &mut Frame, area: Rect, app: &App) {
+    let field_line = |label: &str, value: &str, active: bool| {
+        let style = if active {
+            Style::new().fg(BRIGHT_GREEN).bold()
+        } else {
+            Style::new().fg(DARK_GREEN)
+        };
+        let caret = if active { "_" } else { "" };
+        Line::from(vec![
+            Span::styled(format!("  {label:<10} "), style),
+            Span::styled(format!("{value}{caret}"), Style::new().fg(Color::White)),
+        ])
+    };
+    let masked: String = "*".repeat(app.form.secret.chars().count());
+    let mut lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Create a token — Guardian holds it; the agent never sees the value.",
+            Style::new().fg(DARK_GREEN),
+        )),
+        Line::from(""),
+        field_line(
+            "site/host",
+            &app.form.target,
+            app.form.field == Field::Target,
+        ),
+        field_line("secret", &masked, app.form.field == Field::Secret),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Tab switch field   Enter save   Esc cancel",
+            Style::new().fg(DARK_GREEN),
+        )),
+    ];
+    if !app.form.message.is_empty() {
+        let color = if app.form.message.starts_with("error") {
+            BRIGHT_RED
+        } else {
+            BRIGHT_GREEN
+        };
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            format!("  {}", app.form.message),
+            Style::new().fg(color).bold(),
+        )));
+    }
+    let block = Block::bordered()
+        .border_style(Style::new().fg(DARK_GREEN))
+        .title(" new token ");
+    frame.render_widget(Paragraph::new(lines).block(block), area);
 }
 
 /// The activity archive: most-recent-first, colored by decision, showing where the
@@ -560,6 +713,7 @@ mod tests {
             demo: false,
             view: View::Approvals,
             history: Vec::new(),
+            form: TokenForm::new(),
         }
     }
 
@@ -595,6 +749,50 @@ mod tests {
         let text = rendered(&mut state);
         assert!(text.contains("GUARDIAN"));
         assert!(text.contains("all clear"));
+    }
+
+    #[test]
+    fn new_token_form_renders_and_masks_the_secret() {
+        let mut state = app(Vec::new(), "0 pending");
+        state.view = View::NewToken;
+        state.form.target = "bank.example".to_string();
+        state.form.secret = "topsecret".to_string();
+        let text = rendered(&mut state);
+        assert!(text.contains("new token"));
+        assert!(text.contains("site/host"));
+        assert!(text.contains("bank.example"));
+        assert!(text.contains("*********")); // secret shown masked
+        assert!(!text.contains("topsecret")); // never echoed
+    }
+
+    #[test]
+    fn form_keys_edit_fields_and_switch_with_tab() {
+        let mut state = app(Vec::new(), "0 pending");
+        state.view = View::NewToken;
+        for c in "host".chars() {
+            handle_form_key(&mut state, KeyCode::Char(c));
+        }
+        handle_form_key(&mut state, KeyCode::Backspace); // "hos"
+        handle_form_key(&mut state, KeyCode::Tab); // → secret field
+        for c in "abc".chars() {
+            handle_form_key(&mut state, KeyCode::Char(c));
+        }
+        assert_eq!(state.form.target, "hos");
+        assert_eq!(state.form.secret, "abc");
+    }
+
+    #[test]
+    fn submit_requires_both_fields_then_reports() {
+        let mut state = app(Vec::new(), "0 pending");
+        state.demo = true; // don't touch the real keychain
+        state.view = View::NewToken;
+        submit_token(&mut state);
+        assert!(state.form.message.contains("enter both"));
+        state.form.target = "bank.example".to_string();
+        state.form.secret = "s".to_string();
+        submit_token(&mut state);
+        assert!(state.form.message.contains("bank.example"));
+        assert!(state.form.target.is_empty()); // form reset after submit
     }
 
     #[test]
