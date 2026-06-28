@@ -385,6 +385,47 @@ cap = { count_max = 10 }
     }
 
     #[test]
+    fn evaluate_is_independent_across_calls() {
+        // The shared base context (built once per CompiledPolicy) must not leak a
+        // call's per-action variables into the next: each outcome depends only on
+        // its own action, in any order.
+        let policy = r#"
+version = 1
+role = "t"
+[defaults]
+decision = "ask"
+[[rules]]
+id = "allow-get"
+when = 'action.kind == "HttpRequest" && action.args.method == "GET"'
+decision = "allow"
+"#;
+        let p = CompiledPolicy::from_toml_str(policy).unwrap();
+        let get = action(
+            ActionKind::HttpRequest,
+            "http.get",
+            json!({ "method": "GET" }),
+            None,
+        );
+        let post = action(
+            ActionKind::HttpRequest,
+            "http.post",
+            json!({ "method": "POST" }),
+            None,
+        );
+        // Interleave on the same policy; each result is stable regardless of order.
+        assert_eq!(p.evaluate(&get, &env()).decision, Decision::Allow);
+        assert!(matches!(
+            p.evaluate(&post, &env()).decision,
+            Decision::Ask { .. }
+        ));
+        assert_eq!(p.evaluate(&get, &env()).decision, Decision::Allow);
+        assert!(matches!(
+            p.evaluate(&post, &env()).decision,
+            Decision::Ask { .. }
+        ));
+    }
+
+    #[test]
     fn unknown_field_is_rejected() {
         // A typo in a cap key must be rejected, not silently dropped.
         let policy = r#"

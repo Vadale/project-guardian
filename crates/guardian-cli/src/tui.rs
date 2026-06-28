@@ -609,6 +609,8 @@ fn draw_history(frame: &mut Frame, area: Rect, app: &App) {
     let header_rows = 1;
     let visible = inner_h.saturating_sub(header_rows).max(1);
     let offset = app.history_offset.min(total.saturating_sub(1));
+    let drawn = visible.min(total - offset); // rows actually shown this frame
+    let width = area.width.saturating_sub(2) as usize; // loop-invariant
 
     // Column header doubles as the legend (DARK_GREEN), then the rows.
     let mut lines = vec![Line::from(Span::styled(
@@ -621,7 +623,7 @@ fn draw_history(frame: &mut Frame, area: Rect, app: &App) {
 
     // Most-recent-first, windowed by the scroll offset.
     let rows: Vec<&HistoryView> = app.history.iter().rev().collect();
-    for h in rows.iter().skip(offset).take(visible) {
+    for h in rows.iter().skip(offset).take(drawn) {
         let (label, color) = match h.decision.as_str() {
             "allow" => ("ALLOW", BRIGHT_GREEN),
             "deny" => ("DENY ", BRIGHT_RED),
@@ -637,7 +639,6 @@ fn draw_history(frame: &mut Frame, area: Rect, app: &App) {
         if h.critical {
             rest.push_str("  [critical]");
         }
-        let width = area.width.saturating_sub(2) as usize;
         lines.push(Line::from(vec![
             Span::styled(
                 format!(" {label} "),
@@ -652,7 +653,7 @@ fn draw_history(frame: &mut Frame, area: Rect, app: &App) {
     }
 
     // "more below" hint when the window doesn't reach the end.
-    let shown = offset + visible.min(total - offset);
+    let shown = offset + drawn;
     if shown < total {
         lines.push(Line::from(Span::styled(
             format!("   … {} older below", total - shown),
