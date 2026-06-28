@@ -7,6 +7,24 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 
 ## [Unreleased] — design phase
 
+### Implemented — 2026-06-28 (milestone simplify / perf / UX pass)
+Multi-angle cleanup at the Phase-4 milestone (cleanup + efficiency + correctness +
+security + UX reviews); behavior-preserving, gate green (170 tests).
+- **perf(policy):** `CompiledPolicy` builds the CEL standard-function registry
+  **once** and derives a cheap child scope per `evaluate` (instead of rebuilding it
+  every call). Behavior-identical (reviewed: no cross-call variable leakage,
+  `Arc<CompiledPolicy>` stays `Send+Sync`; new `evaluate_is_independent_across_calls`
+  test). Hot-path latency **≈3.9 µs → ≈2.6 µs/decision**.
+- **cleanup(cli):** one `resolve_audit_path` helper replaces 4 duplicated audit-path
+  blocks; `write_private_file` creates the pack signing-key with mode `0o600` **at
+  creation** (closes a create-then-chmod window).
+- **ux(tui):** the activity **archive is now a scrollable table** (column legend,
+  humanized action kind, `j/k` + mouse-wheel scroll, "… N older below" hint,
+  unknown decisions flagged yellow); the **token form** shows visible `[____]` input
+  tracks, a yellow "granting trust" accent on the active field/title, and clears its
+  status on the next keystroke; footer surfaces `r` (refresh); panic shows an
+  explicit "denied N". Reviewed by code-reviewer (approve) + security-auditor (clean).
+
 ### Implemented — 2026-06-28 (cockpit: create a token)
 - **Create-a-token form in the cockpit (`guardian ui`)** — press **`n`** to open a
   form: enter the **site/host** and its **secret**; on save the secret is stored in

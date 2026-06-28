@@ -77,10 +77,12 @@ A `ratatui` TUI: a `DaemonClient` polls the daemon's pending queue and relays th
 user's allow/deny over the socket. No business logic — it renders state and sends
 decisions.
 - Three screens: **Approvals** (pending queue), the **activity archive** (`history`;
-  `Tab` toggles) — recent decisions with outcome, kind, the host the agent went to,
-  the rule/reason, a `[critical]` flag (via `DaemonClient::history`) — and a **new-token
-  form** (press **`n`**): enter a site/host + secret to store a token in the OS
-  keychain (masked secret; the agent never sees it; local keychain op, no daemon).
+  `Tab` toggles) — a **scrollable table** (`j/k` + mouse wheel) with a column legend,
+  the decision outcome, humanized action kind, the host the agent went to, the
+  rule/reason, and a `[critical]` flag (via `DaemonClient::history`) — and a
+  **new-token form** (press **`n`**): visible `[____]` input tracks for a site/host +
+  secret, stored in the OS keychain (masked secret; the agent never sees it; local
+  keychain op, no daemon). Footer keys: `j/k a d p n r Tab q`.
 - Keyboard (`j/k` select, `a` allow, `d` deny, `p` panic = deny-all, `r` refresh,
   `Tab` switch screen, `q` quit) **and** mouse clicks on the `[A Allow]` / `[D Deny]`
   buttons (hit-tested against recorded button rects).

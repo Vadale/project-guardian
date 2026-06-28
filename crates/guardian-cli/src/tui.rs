@@ -95,6 +95,8 @@ struct App {
     view: View,
     /// Recent decisions for the History view (most-recent-last from the daemon).
     history: Vec<HistoryView>,
+    /// Scroll offset into the History view (0 = top, i.e. most recent).
+    history_offset: usize,
     /// The new-token form state (used on the NewToken screen).
     form: TokenForm,
 }
@@ -124,6 +126,7 @@ async fn run_loop(terminal: &mut DefaultTerminal, client: &DaemonClient, demo: b
         demo,
         view: View::Approvals,
         history: if demo { demo_history() } else { Vec::new() },
+        history_offset: 0,
         form: TokenForm::new(),
     };
     let mut events = EventStream::new();
@@ -184,8 +187,21 @@ async fn handle_event(event: Event, app: &mut App, client: &DaemonClient) {
         }
         Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
             KeyCode::Char('q') | KeyCode::Esc => app.quit = true,
-            KeyCode::Char('j') | KeyCode::Down => move_selection(app, 1),
-            KeyCode::Char('k') | KeyCode::Up => move_selection(app, -1),
+            // j/k move the approval selection, or scroll the archive on History.
+            KeyCode::Char('j') | KeyCode::Down => {
+                if app.view == View::History {
+                    scroll_history(app, 1);
+                } else {
+                    move_selection(app, 1);
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if app.view == View::History {
+                    scroll_history(app, -1);
+                } else {
+                    move_selection(app, -1);
+                }
+            }
             KeyCode::Char('a') => resolve_selected(app, client, true).await,
             KeyCode::Char('d') => resolve_selected(app, client, false).await,
             KeyCode::Char('p') => panic_all(app, client).await,
@@ -221,8 +237,21 @@ async fn handle_event(event: Event, app: &mut App, client: &DaemonClient) {
                 act_on(app, client, id, allow).await;
             }
         }
+        // Mouse wheel scrolls the activity archive.
+        Event::Mouse(m) if app.view == View::History => match m.kind {
+            MouseEventKind::ScrollDown => scroll_history(app, 1),
+            MouseEventKind::ScrollUp => scroll_history(app, -1),
+            _ => {}
+        },
         _ => {}
     }
+}
+
+/// Scroll the History view, clamped to the available rows.
+fn scroll_history(app: &mut App, delta: isize) {
+    let max = app.history.len().saturating_sub(1);
+    let next = (app.history_offset as isize + delta).clamp(0, max as isize);
+    app.history_offset = next as usize;
 }
 
 /// Handle a keystroke on the new-token form. Pure + local (storing a secret is a
@@ -237,10 +266,14 @@ fn handle_form_key(app: &mut App, code: KeyCode) {
             };
         }
         KeyCode::Backspace => {
+            app.form.message.clear();
             app.form.active().pop();
         }
         KeyCode::Enter => submit_token(app),
-        KeyCode::Char(c) => app.form.active().push(c),
+        KeyCode::Char(c) => {
+            app.form.message.clear();
+            app.form.active().push(c);
+        }
         _ => {}
     }
 }
@@ -284,9 +317,12 @@ async fn resolve_selected(app: &mut App, client: &DaemonClient, allow: bool) {
 
 async fn panic_all(app: &mut App, client: &DaemonClient) {
     let ids: Vec<u64> = app.pending.iter().map(|p| p.id).collect();
+    let n = ids.len();
     for id in ids {
         act_on(app, client, id, false).await;
     }
+    // Confirm the bulk deny fired (act_on/refresh otherwise only updates counts).
+    app.status = format!("panic: denied {n}");
 }
 
 /// Resolve one action: locally (demo) or via the daemon (live).
@@ -431,6 +467,8 @@ fn draw(frame: &mut Frame, app: &mut App) {
             Span::raw(" new token  "),
             key(" Tab ", DARK_GREEN),
             Span::raw(" archive  "),
+            key(" r ", DARK_GREEN),
+            Span::raw(" refresh  "),
             key(" q ", DARK_GREEN),
             Span::raw(" quit"),
         ])
@@ -467,16 +505,29 @@ fn draw_body(frame: &mut Frame, area: Rect, app: &mut App) {
 /// The "create a token" form: a site (host) field and a masked secret field. On
 /// submit the secret is stored in the OS keychain; the agent never sees it.
 fn draw_new_token(frame: &mut Frame, area: Rect, app: &App) {
+    // Granting a credential is a "yellow" (medium-stakes) action — the active field
+    // is tinted yellow; a visible `[____]` track shows an empty field's input area.
     let field_line = |label: &str, value: &str, active: bool| {
-        let style = if active {
-            Style::new().fg(BRIGHT_GREEN).bold()
+        let label_style = if active {
+            Style::new().fg(MID_YELLOW).bold()
         } else {
             Style::new().fg(DARK_GREEN)
         };
+        let shown = if value.is_empty() {
+            "____________".to_string()
+        } else {
+            value.to_string()
+        };
         let caret = if active { "_" } else { "" };
+        let value_style = if value.is_empty() {
+            Style::new().fg(DARK_GREEN) // placeholder track
+        } else {
+            Style::new().fg(Color::White)
+        };
         Line::from(vec![
-            Span::styled(format!("  {label:<10} "), style),
-            Span::styled(format!("{value}{caret}"), Style::new().fg(Color::White)),
+            Span::styled(format!("  {label:<10} ["), label_style),
+            Span::styled(format!("{shown}{caret}"), value_style),
+            Span::styled("]", label_style),
         ])
     };
     let masked: String = "*".repeat(app.form.secret.chars().count());
@@ -513,18 +564,35 @@ fn draw_new_token(frame: &mut Frame, area: Rect, app: &App) {
     }
     let block = Block::bordered()
         .border_style(Style::new().fg(DARK_GREEN))
-        .title(" new token ");
+        .title(Span::styled(
+            " new token ",
+            Style::new().fg(MID_YELLOW).bold(),
+        ));
     frame.render_widget(Paragraph::new(lines).block(block), area);
 }
 
-/// The activity archive: most-recent-first, colored by decision, showing where the
-/// agent went (host) and the rule/reason.
+/// Plain-language name for an action kind (the rest of the cockpit speaks plainly).
+fn humanize_kind(kind: &str) -> &str {
+    match kind {
+        "HttpRequest" => "web request",
+        "FileRead" => "read file",
+        "FileWrite" => "write file",
+        "Exec" => "run command",
+        "Email" => "send email",
+        "Delete" => "delete",
+        other => other,
+    }
+}
+
+/// The activity archive: a scrollable table, most-recent-first, colored by decision,
+/// showing what the agent did, where it went (host), and the rule/reason.
 fn draw_history(frame: &mut Frame, area: Rect, app: &App) {
-    let title = format!(" activity archive — {} recent ", app.history.len());
+    let total = app.history.len();
+    let title = format!(" activity archive — {total} recent (j/k or wheel to scroll) ");
     let block = Block::bordered()
         .border_style(Style::new().fg(DARK_GREEN))
         .title(title);
-    if app.history.is_empty() {
+    if total == 0 {
         let empty = Paragraph::new(vec![
             Line::from(""),
             Line::from(Span::styled(
@@ -536,40 +604,62 @@ fn draw_history(frame: &mut Frame, area: Rect, app: &App) {
         frame.render_widget(empty, area);
         return;
     }
-    let width = area.width.saturating_sub(2) as usize;
-    let lines: Vec<Line> = app
-        .history
-        .iter()
-        .rev() // most recent first
-        .map(|h| {
-            let (label, color) = match h.decision.as_str() {
-                "allow" => ("ALLOW", BRIGHT_GREEN),
-                "deny" => ("DENY ", BRIGHT_RED),
-                "ask" => ("ASK  ", MID_YELLOW),
-                _ => ("?????", DARK_GREEN),
-            };
-            let where_to = h.host.as_deref().unwrap_or("-");
-            let rule = h.rule.as_deref().unwrap_or("-");
-            let mut rest = format!("{:<12} {:<20} {}", h.kind, where_to, rule);
-            if let Some(reason) = &h.reason {
-                rest.push_str(&format!(" — {reason}"));
-            }
-            if h.critical {
-                rest.push_str("  [critical]");
-            }
-            Line::from(vec![
-                Span::styled(
-                    format!(" {label} "),
-                    Style::new().fg(Color::Black).bg(color).bold(),
-                ),
-                Span::raw(" "),
-                Span::styled(
-                    truncate(&rest, width.saturating_sub(9)),
-                    Style::new().fg(Color::White),
-                ),
-            ])
-        })
-        .collect();
+
+    let inner_h = area.height.saturating_sub(2) as usize; // minus borders
+    let header_rows = 1;
+    let visible = inner_h.saturating_sub(header_rows).max(1);
+    let offset = app.history_offset.min(total.saturating_sub(1));
+    let drawn = visible.min(total - offset); // rows actually shown this frame
+    let width = area.width.saturating_sub(2) as usize; // loop-invariant
+
+    // Column header doubles as the legend (DARK_GREEN), then the rows.
+    let mut lines = vec![Line::from(Span::styled(
+        format!(
+            " {:<7} {:<13} {:<20} rule / reason",
+            "OUTCOME", "ACTION", "HOST"
+        ),
+        Style::new().fg(DARK_GREEN).bold(),
+    ))];
+
+    // Most-recent-first, windowed by the scroll offset.
+    let rows: Vec<&HistoryView> = app.history.iter().rev().collect();
+    for h in rows.iter().skip(offset).take(drawn) {
+        let (label, color) = match h.decision.as_str() {
+            "allow" => ("ALLOW", BRIGHT_GREEN),
+            "deny" => ("DENY ", BRIGHT_RED),
+            "ask" => ("ASK  ", MID_YELLOW),
+            _ => ("?????", MID_YELLOW), // an unrecognized row should stand out
+        };
+        let where_to = h.host.as_deref().unwrap_or("-");
+        let rule = h.rule.as_deref().unwrap_or("-");
+        let mut rest = format!("{:<13} {:<20} {}", humanize_kind(&h.kind), where_to, rule);
+        if let Some(reason) = &h.reason {
+            rest.push_str(&format!(" — {reason}"));
+        }
+        if h.critical {
+            rest.push_str("  [critical]");
+        }
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!(" {label} "),
+                Style::new().fg(Color::Black).bg(color).bold(),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                truncate(&rest, width.saturating_sub(9)),
+                Style::new().fg(Color::White),
+            ),
+        ]));
+    }
+
+    // "more below" hint when the window doesn't reach the end.
+    let shown = offset + drawn;
+    if shown < total {
+        lines.push(Line::from(Span::styled(
+            format!("   … {} older below", total - shown),
+            Style::new().fg(DARK_GREEN),
+        )));
+    }
     frame.render_widget(Paragraph::new(lines).block(block), area);
 }
 
@@ -713,6 +803,7 @@ mod tests {
             demo: false,
             view: View::Approvals,
             history: Vec::new(),
+            history_offset: 0,
             form: TokenForm::new(),
         }
     }
@@ -802,10 +893,24 @@ mod tests {
         state.history = demo_history();
         let text = rendered(&mut state);
         assert!(text.contains("activity archive"));
+        assert!(text.contains("OUTCOME")); // column header / legend
         assert!(text.contains("ALLOW"));
         assert!(text.contains("DENY"));
+        assert!(text.contains("web request")); // kind humanized (HttpRequest)
         assert!(text.contains("bank.example")); // where the agent went
         assert!(text.contains("critical")); // the money-movement deny is flagged
+    }
+
+    #[test]
+    fn history_scroll_offset_is_clamped() {
+        let mut state = app(Vec::new(), "0 pending");
+        state.history = demo_history(); // 4 rows
+        scroll_history(&mut state, -1); // can't go above the top
+        assert_eq!(state.history_offset, 0);
+        for _ in 0..10 {
+            scroll_history(&mut state, 1);
+        }
+        assert_eq!(state.history_offset, state.history.len() - 1); // clamped to last
     }
 
     #[test]
