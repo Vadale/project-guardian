@@ -76,10 +76,30 @@ guardian log --verify-key <hex>    # also verify the head signature of a signed 
 guardian report                    # counts, blocked threats, and suggestions to confirm
 ```
 
-## Approvals (the yellow path)
-For `ask` decisions, run the daemon + cockpit and pass `--daemon <socket>` to the
-proxy/mcp; you approve or deny each pending action in the terminal cockpit
-(`guardian ui`). Without a cockpit, `ask` fails closed (blocked).
+## Approvals (the yellow path) — running the cockpit next to your agent
+The cockpit is a **separate process** that attaches to the **same daemon** as your
+agent, over a shared control socket. They line up automatically: `guardian ui`, the
+daemon, and `--daemon`/the proxy all default to `$GUARDIAN_SOCK` (else
+`<temp>/guardian.sock`). Set it once and everything connects with no flags:
+
+```sh
+export GUARDIAN_SOCK=/tmp/guardian.sock
+
+# terminal/pane 1 — the daemon (the approval queue + control socket)
+guardian-daemon
+
+# terminal/pane 2 — your agent, mediated by Guardian, routing asks to the daemon
+guardian proxy --daemon "$GUARDIAN_SOCK" --policy …    # or: guardian mcp --daemon …
+
+# terminal/pane 3 — the cockpit (a full-screen TUI, so give it its own pane/tab)
+guardian ui
+```
+
+The cockpit takes over its terminal, so **run it in its own pane/tab/window** beside
+the agent (e.g. a tmux/iTerm split) — that's the intended "sits next to the harness"
+layout. In it: `Tab` switches to the **activity archive** (what the agent did, where
+it went), `n` opens the **create-token** form, `a`/`d` allow/deny pending actions.
+Without a cockpit, `ask` fails closed (blocked).
 
 ## Sharing policy safely (signed packs)
 ```sh
