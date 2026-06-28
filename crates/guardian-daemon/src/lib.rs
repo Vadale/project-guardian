@@ -348,6 +348,15 @@ mod server {
         let _ = std::fs::remove_file(path);
         let name = socket_name(path)?;
         let listener = ListenerOptions::new().name(name).create_tokio()?;
+        // Restrict the control socket to the owner: connecting needs write access to
+        // the socket node, so `0o600` stops a *different* local user (on a multi-user
+        // host) from approving asks or toggling the kill switch. (The Windows named
+        // pipe inherits the default per-user ACL.)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+        }
         loop {
             let stream = listener.accept().await?;
             let gateway = gateway.clone();
@@ -746,6 +755,20 @@ decision = "ask"
                 .unwrap();
             let mut lines = BufReader::new(read_half).lines();
             lines.next_line().await.unwrap().unwrap()
+        }
+
+        #[cfg(unix)]
+        #[tokio::test]
+        async fn control_socket_is_owner_only() {
+            use std::os::unix::fs::PermissionsExt;
+            let path = start().await;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            // Only the owner may connect (approve asks / toggle the kill switch).
+            assert_eq!(
+                mode & 0o077,
+                0,
+                "control socket must not be group/world accessible"
+            );
         }
 
         #[tokio::test]

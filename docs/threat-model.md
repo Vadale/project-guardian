@@ -122,6 +122,18 @@ user," but provenance/logging makes misuse attributable.
 - **WebSocket frame content over the proxy is not inspected** (the upgrade host is
   policed; frames are not) — an allowed WS host is an unmediated channel until
   frame inspection lands (§7.1 increment 4).
+- **Exfiltration body scan is framing- and size-limited.** The proxy buffers and
+  scans a request body only when it has a `Content-Length` ≤ 1 MiB; a chunked /
+  no-`Content-Length` / oversize body is forwarded with `body_contains_known_secret =
+  false`, so the secret-exfiltration rule does **not fire** on it (it still falls to
+  the restrictive default — fail safe, not open). The `action.context.extra.
+  body_inspected` signal is exposed so a strict policy can require inspection for
+  writes to untrusted hosts; streaming-scan up to the cap is tracked.
+- **Daemon control socket is owner-only, not multi-user-hardened beyond that.** The
+  socket is set to `0o600` so only the owner can connect (approve asks / toggle the
+  kill switch); a *different* local user cannot. A fully-compromised **same-user**
+  process is out of scope (it could connect, as it could read the keychain). The
+  default path is a per-user temp socket; `GUARDIAN_SOCK` overrides it.
 - **Broker keychain at-rest protection is the platform's.** Secrets stored via the
   OS keychain (§8.1) are only as protected as the platform's at-rest encryption and
   ACLs. On macOS the generic-password item is readable by any process running as the
