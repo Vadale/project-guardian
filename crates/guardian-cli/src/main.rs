@@ -320,9 +320,7 @@ fn run_exec(
 
     // Record the decision (best-effort: the audit log is the forensic record, not a
     // gate for the local exec front-end).
-    let audit_path = audit
-        .or_else(|| std::env::var_os("GUARDIAN_AUDIT").map(PathBuf::from))
-        .unwrap_or_else(|| guardian_daemon::config::guardian_dir().join("audit.db"));
+    let audit_path = resolve_audit_path(audit);
     if let Some(parent) = audit_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -383,6 +381,14 @@ fn run_exec(
             std::process::exit(1);
         }
     }
+}
+
+/// Resolve the audit-log path: explicit `--audit`, else `$GUARDIAN_AUDIT`, else
+/// `<guardian-dir>/audit.db` (the same precedence as `Config::audit_path`).
+fn resolve_audit_path(audit: Option<PathBuf>) -> PathBuf {
+    audit
+        .or_else(|| std::env::var_os("GUARDIAN_AUDIT").map(PathBuf::from))
+        .unwrap_or_else(|| guardian_daemon::config::guardian_dir().join("audit.db"))
 }
 
 /// Wall-clock milliseconds for the exec action's timestamp.
@@ -476,9 +482,7 @@ async fn run_proxy(
     }
     let broker = Arc::new(broker);
 
-    let audit_path = audit
-        .or_else(|| std::env::var_os("GUARDIAN_AUDIT").map(PathBuf::from))
-        .unwrap_or_else(|| guardian_daemon::config::guardian_dir().join("audit.db"));
+    let audit_path = resolve_audit_path(audit);
     if let Some(parent) = audit_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -704,23 +708,32 @@ fn record_pack_provenance(
     Ok(())
 }
 
-/// Write a secret file with owner-only permissions on unix (best-effort elsewhere).
+/// Write a secret file with owner-only permissions. On unix the mode is set **at
+/// creation** (no world-readable window between create and chmod), then re-tightened
+/// for a pre-existing file; best-effort elsewhere.
+#[cfg(unix)]
 fn write_private_file(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
-    std::fs::write(path, contents)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
-    }
-    Ok(())
+    use std::io::Write;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)?;
+    f.write_all(contents.as_bytes())?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+}
+
+#[cfg(not(unix))]
+fn write_private_file(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
+    std::fs::write(path, contents)
 }
 
 /// Summarize recent audit activity and surface (advisory) rule suggestions. Read
 /// only — never edits the policy or the log.
 fn run_report(audit: Option<PathBuf>, window: usize) -> anyhow::Result<()> {
-    let path = audit
-        .or_else(|| std::env::var_os("GUARDIAN_AUDIT").map(PathBuf::from))
-        .unwrap_or_else(|| guardian_daemon::config::guardian_dir().join("audit.db"));
+    let path = resolve_audit_path(audit);
     if !path.exists() {
         println!("No audit log at {} yet.", path.display());
         return Ok(());
@@ -762,9 +775,7 @@ fn run_report(audit: Option<PathBuf>, window: usize) -> anyhow::Result<()> {
 /// Browse the tamper-evident audit log: print recent decisions and the integrity
 /// status. Read-only — never modifies the log.
 fn run_log(audit: Option<PathBuf>, limit: usize, verify_key: Option<String>) -> anyhow::Result<()> {
-    let path = audit
-        .or_else(|| std::env::var_os("GUARDIAN_AUDIT").map(PathBuf::from))
-        .unwrap_or_else(|| guardian_daemon::config::guardian_dir().join("audit.db"));
+    let path = resolve_audit_path(audit);
     if !path.exists() {
         println!("No audit log at {} yet.", path.display());
         return Ok(());
