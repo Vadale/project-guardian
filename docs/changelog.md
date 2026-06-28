@@ -7,6 +7,16 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 
 ## [Unreleased] — design phase
 
+### Implemented — 2026-06-28 (cockpit: activity archive)
+- **Activity archive in the cockpit (`guardian ui` + daemon `history`)** — the
+  terminal cockpit gains a second screen (toggle with **Tab**) showing the **archive
+  of what the agent did**: each recent decision with its outcome (allow/deny/ask,
+  colored), the action kind, **where it went (host)**, the matched rule, the reason,
+  and a `[critical]` flag. Backed by a new daemon control command `history { limit }`
+  → `HistoryView` rows (`DaemonClient::history`), served from a new
+  `Gateway::audit_tail`. The audit log now also records the **`host`** ("where the
+  agent went") on each entry. Headless render test for the new view.
+
 ### Implemented — 2026-06-27 (Phase 4 — Hardening)
 - **Cross-platform IPC — Windows support (`guardian-daemon`, §9b.3)** — the daemon's
   control socket (`serve` / `DaemonClient` / `DaemonRouter`) now runs on **Windows**

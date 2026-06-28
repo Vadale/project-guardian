@@ -50,6 +50,10 @@ pub struct AuditEntry {
     /// suggestions can refuse to ever propose loosening a critical rule (invariant 4).
     #[serde(default)]
     pub critical: bool,
+    /// Destination host, if the action had one (HTTP requests) — "where the agent
+    /// went", for the activity archive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
 }
 
 impl AuditEntry {
@@ -77,6 +81,7 @@ impl AuditEntry {
             checker_rationale,
             user_response,
             critical,
+            host: action.context.host.clone(),
         }
     }
 }
@@ -226,6 +231,7 @@ impl AuditLog {
                 checker_rationale: None,
                 user_response: None,
                 critical: false,
+                host: None,
             });
             out.push((seq as u64, entry));
         }
@@ -368,6 +374,7 @@ mod tests {
             checker_rationale: None,
             user_response: None,
             critical: false,
+            host: None,
         }
     }
 

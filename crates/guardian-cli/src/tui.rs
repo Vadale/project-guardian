@@ -15,7 +15,7 @@ use crossterm::event::{
 };
 use crossterm::execute;
 use futures::StreamExt;
-use guardian_daemon::{DaemonClient, PendingView};
+use guardian_daemon::{DaemonClient, HistoryView, PendingView};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, BorderType, Paragraph};
 use ratatui::DefaultTerminal;
@@ -38,6 +38,15 @@ struct Hit {
     id: u64,
 }
 
+/// Which screen the cockpit is showing.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum View {
+    /// Pending approvals to allow/deny (the yellow path).
+    Approvals,
+    /// The activity archive: what the agent did, where it went (host), the rule.
+    History,
+}
+
 struct App {
     pending: Vec<PendingView>,
     selected: usize,
@@ -47,6 +56,10 @@ struct App {
     quit: bool,
     /// Self-contained preview with sample data; no daemon is contacted.
     demo: bool,
+    /// Current screen (Tab switches).
+    view: View,
+    /// Recent decisions for the History view (most-recent-last from the daemon).
+    history: Vec<HistoryView>,
 }
 
 /// Entry point for `guardian ui`. With `demo`, shows sample actions and never
@@ -72,6 +85,8 @@ async fn run_loop(terminal: &mut DefaultTerminal, client: &DaemonClient, demo: b
         hits: Vec::new(),
         quit: false,
         demo,
+        view: View::Approvals,
+        history: if demo { demo_history() } else { Vec::new() },
     };
     let mut events = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_millis(400));
@@ -115,6 +130,12 @@ async fn refresh(app: &mut App, client: &DaemonClient) {
         }
         Err(e) => app.status = format!("daemon unreachable ({e})"),
     }
+    // Refresh the activity archive when it's on screen.
+    if app.view == View::History {
+        if let Ok(history) = client.history(50).await {
+            app.history = history;
+        }
+    }
 }
 
 async fn handle_event(event: Event, app: &mut App, client: &DaemonClient) {
@@ -127,6 +148,13 @@ async fn handle_event(event: Event, app: &mut App, client: &DaemonClient) {
             KeyCode::Char('d') => resolve_selected(app, client, false).await,
             KeyCode::Char('p') => panic_all(app, client).await,
             KeyCode::Char('r') => refresh(app, client).await,
+            KeyCode::Tab => {
+                app.view = match app.view {
+                    View::Approvals => View::History,
+                    View::History => View::Approvals,
+                };
+                refresh(app, client).await;
+            }
             _ => {}
         },
         Event::Mouse(m) if matches!(m.kind, MouseEventKind::Down(MouseButton::Left)) => {
@@ -224,6 +252,36 @@ fn demo_pending() -> Vec<PendingView> {
     ]
 }
 
+fn demo_history() -> Vec<HistoryView> {
+    let mk =
+        |decision: &str, kind: &str, host: Option<&str>, rule: &str, critical: bool| HistoryView {
+            decision: decision.to_string(),
+            kind: kind.to_string(),
+            host: host.map(str::to_string),
+            rule: Some(rule.to_string()),
+            reason: None,
+            critical,
+        };
+    vec![
+        mk(
+            "allow",
+            "HttpRequest",
+            Some("bank.example"),
+            "allow-reads",
+            false,
+        ),
+        mk(
+            "deny",
+            "HttpRequest",
+            Some("bank.example"),
+            "deny-writes",
+            true,
+        ),
+        mk("allow", "FileRead", None, "allow-home-reads", false),
+        mk("ask", "Exec", None, "-", false),
+    ]
+}
+
 fn draw(frame: &mut Frame, app: &mut App) {
     app.hits.clear();
     let chunks = Layout::vertical([
@@ -273,6 +331,8 @@ fn draw(frame: &mut Frame, app: &mut App) {
         Span::raw(" panic  "),
         key(" r ", DARK_GREEN),
         Span::raw(" refresh  "),
+        key(" Tab ", DARK_GREEN),
+        Span::raw(" approvals/archive  "),
         key(" q ", DARK_GREEN),
         Span::raw(" quit"),
     ]))
@@ -298,6 +358,69 @@ fn status_color(status: &str) -> Color {
 }
 
 fn draw_body(frame: &mut Frame, area: Rect, app: &mut App) {
+    match app.view {
+        View::Approvals => draw_approvals(frame, area, app),
+        View::History => draw_history(frame, area, app),
+    }
+}
+
+/// The activity archive: most-recent-first, colored by decision, showing where the
+/// agent went (host) and the rule/reason.
+fn draw_history(frame: &mut Frame, area: Rect, app: &App) {
+    let title = format!(" activity archive — {} recent ", app.history.len());
+    let block = Block::bordered()
+        .border_style(Style::new().fg(DARK_GREEN))
+        .title(title);
+    if app.history.is_empty() {
+        let empty = Paragraph::new(vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "   no decisions recorded yet",
+                Style::new().fg(DARK_GREEN),
+            )),
+        ])
+        .block(block);
+        frame.render_widget(empty, area);
+        return;
+    }
+    let width = area.width.saturating_sub(2) as usize;
+    let lines: Vec<Line> = app
+        .history
+        .iter()
+        .rev() // most recent first
+        .map(|h| {
+            let (label, color) = match h.decision.as_str() {
+                "allow" => ("ALLOW", BRIGHT_GREEN),
+                "deny" => ("DENY ", BRIGHT_RED),
+                "ask" => ("ASK  ", MID_YELLOW),
+                _ => ("?????", DARK_GREEN),
+            };
+            let where_to = h.host.as_deref().unwrap_or("-");
+            let rule = h.rule.as_deref().unwrap_or("-");
+            let mut rest = format!("{:<12} {:<20} {}", h.kind, where_to, rule);
+            if let Some(reason) = &h.reason {
+                rest.push_str(&format!(" — {reason}"));
+            }
+            if h.critical {
+                rest.push_str("  [critical]");
+            }
+            Line::from(vec![
+                Span::styled(
+                    format!(" {label} "),
+                    Style::new().fg(Color::Black).bg(color).bold(),
+                ),
+                Span::raw(" "),
+                Span::styled(
+                    truncate(&rest, width.saturating_sub(9)),
+                    Style::new().fg(Color::White),
+                ),
+            ])
+        })
+        .collect();
+    frame.render_widget(Paragraph::new(lines).block(block), area);
+}
+
+fn draw_approvals(frame: &mut Frame, area: Rect, app: &mut App) {
     if app.pending.is_empty() {
         let empty = Paragraph::new(vec![
             Line::from(""),
@@ -435,6 +558,8 @@ mod tests {
             hits: Vec::new(),
             quit: false,
             demo: false,
+            view: View::Approvals,
+            history: Vec::new(),
         }
     }
 
@@ -470,6 +595,19 @@ mod tests {
         let text = rendered(&mut state);
         assert!(text.contains("GUARDIAN"));
         assert!(text.contains("all clear"));
+    }
+
+    #[test]
+    fn history_view_renders_the_activity_archive() {
+        let mut state = app(Vec::new(), "0 pending");
+        state.view = View::History;
+        state.history = demo_history();
+        let text = rendered(&mut state);
+        assert!(text.contains("activity archive"));
+        assert!(text.contains("ALLOW"));
+        assert!(text.contains("DENY"));
+        assert!(text.contains("bank.example")); // where the agent went
+        assert!(text.contains("critical")); // the money-movement deny is flagged
     }
 
     #[test]

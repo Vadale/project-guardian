@@ -144,6 +144,7 @@ mod tests {
             checker_rationale: None,
             user_response: response.map(|s| s.into()),
             critical,
+            host: None,
         }
     }
     fn deny(label: &str) -> AuditEntry {
@@ -157,6 +158,7 @@ mod tests {
             checker_rationale: None,
             user_response: None,
             critical: false,
+            host: None,
         }
     }
 

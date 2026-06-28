@@ -267,6 +267,30 @@ mod server {
         KillSwitch { engage: bool },
         /// Report audit-log status.
         VerifyAudit,
+        /// Recent decisions — the agent's activity archive (most recent `limit`).
+        History {
+            #[serde(default = "default_history_limit")]
+            limit: usize,
+        },
+    }
+
+    fn default_history_limit() -> usize {
+        50
+    }
+
+    /// One row of the activity archive, for the cockpit's history view.
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct HistoryView {
+        pub decision: String,
+        pub kind: String,
+        #[serde(default)]
+        pub host: Option<String>,
+        #[serde(default)]
+        pub rule: Option<String>,
+        #[serde(default)]
+        pub reason: Option<String>,
+        #[serde(default)]
+        pub critical: bool,
     }
 
     /// A server response (one JSON object per line).
@@ -292,6 +316,9 @@ mod server {
         Audit {
             entries: u64,
             intact: bool,
+        },
+        History {
+            items: Vec<HistoryView>,
         },
         Error {
             message: String,
@@ -461,6 +488,21 @@ mod server {
                 entries: gateway.audit_len(),
                 intact: gateway.audit_verify().is_ok(),
             },
+            Request::History { limit } => {
+                let items = gateway
+                    .audit_tail(limit)
+                    .into_iter()
+                    .map(|e| HistoryView {
+                        decision: e.decision,
+                        kind: e.action_kind,
+                        host: e.host,
+                        rule: e.matched_rule,
+                        reason: e.decision_reason.or(e.checker_rationale),
+                        critical: e.critical,
+                    })
+                    .collect();
+                Response::History { items }
+            }
         }
     }
 
@@ -545,6 +587,19 @@ mod server {
                 .get("engaged")
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false))
+        }
+
+        /// The recent activity archive (most recent `limit` decisions).
+        pub async fn history(&self, limit: usize) -> std::io::Result<Vec<HistoryView>> {
+            let value = self
+                .rpc(&format!(r#"{{"cmd":"history","limit":{limit}}}"#))
+                .await?;
+            let items = value
+                .get("items")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
+            serde_json::from_value(items)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
         }
 
         /// Submit a tool call and return the gateway's outcome.
@@ -825,7 +880,7 @@ decision = "ask"
     }
 }
 
-pub use server::{serve, DaemonClient, DaemonRouter, PendingView, Request, Response};
+pub use server::{serve, DaemonClient, DaemonRouter, HistoryView, PendingView, Request, Response};
 
 #[cfg(test)]
 mod tests {

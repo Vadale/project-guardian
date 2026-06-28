@@ -278,6 +278,17 @@ impl Gateway {
             .unwrap_or(0)
     }
 
+    /// The most recent `limit` audit entries (oldest-first) — the agent's activity
+    /// archive, for the cockpit's history view. Empty if the log can't be read.
+    pub fn audit_tail(&self, limit: usize) -> Vec<AuditEntry> {
+        self.audit
+            .lock()
+            .expect("audit mutex poisoned")
+            .tail(limit)
+            .map(|rows| rows.into_iter().map(|(_, e)| e).collect())
+            .unwrap_or_default()
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn record(
         &self,
