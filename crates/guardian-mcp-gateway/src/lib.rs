@@ -195,7 +195,8 @@ pub struct Gateway {
     /// Sensitive values to tokenize in tool results before the agent sees them
     /// (empty = tokenization off, zero overhead). The agent works with opaque tokens
     /// and Guardian restores them only into an authorized outbound call (ADR-0005).
-    data_protection: Vec<String>,
+    /// Runtime-mutable (via [`Gateway::add_protected`]) so the cockpit can add values.
+    data_protection: Mutex<Vec<String>>,
     /// Per-session data vaults (token↔value), so a token only resolves in the session
     /// that minted it.
     vaults: Mutex<HashMap<String, DataVault>>,
@@ -224,7 +225,7 @@ impl Gateway {
             env,
             self_protection: SelfProtection::default(),
             counter: AtomicU64::new(0),
-            data_protection: Vec::new(),
+            data_protection: Mutex::new(Vec::new()),
             vaults: Mutex::new(HashMap::new()),
             pii_detector: None,
         }
@@ -240,7 +241,7 @@ impl Gateway {
     /// results before the agent sees them, and restored only into an authorized
     /// outbound call (ADR-0005). Empty (default) leaves tokenization off.
     pub fn with_data_protection(mut self, values: Vec<String>) -> Self {
-        self.data_protection = values;
+        self.data_protection = Mutex::new(values);
         self
     }
 
@@ -251,18 +252,69 @@ impl Gateway {
         self
     }
 
+    /// Add a sensitive value to protect at runtime (e.g. from the cockpit). It is
+    /// learned into every existing session vault too, so already-open sessions start
+    /// tokenizing it immediately.
+    pub fn add_protected(&self, value: impl Into<String>) {
+        let value = value.into();
+        {
+            let mut list = self.data_protection.lock().expect("protect mutex poisoned");
+            if list.iter().any(|v| v == &value) {
+                return;
+            }
+            list.push(value.clone());
+        }
+        // Lock order is always data_protection → vaults (see `with_vault`) to avoid deadlock.
+        for v in self
+            .vaults
+            .lock()
+            .expect("vault mutex poisoned")
+            .values_mut()
+        {
+            v.learn(&value);
+        }
+    }
+
+    /// `(values protected, tokens issued across sessions)` — for the cockpit status view.
+    pub fn vault_stats(&self) -> (usize, usize) {
+        let protected = self
+            .data_protection
+            .lock()
+            .expect("protect mutex poisoned")
+            .len();
+        let tokens = self
+            .vaults
+            .lock()
+            .expect("vault mutex poisoned")
+            .values()
+            .map(|v| v.token_count())
+            .sum();
+        (protected, tokens)
+    }
+
     /// Tokenization runs when there is anything to redact: configured known values
     /// and/or a sidecar detector.
     fn tokenization_on(&self) -> bool {
-        !self.data_protection.is_empty() || self.pii_detector.is_some()
+        !self
+            .data_protection
+            .lock()
+            .expect("protect mutex poisoned")
+            .is_empty()
+            || self.pii_detector.is_some()
     }
 
     /// The session vault, created (and seeded with the protected values) on first use.
     fn with_vault<T>(&self, session: &str, f: impl FnOnce(&mut DataVault) -> T) -> T {
+        // Clone the protected list first (lock order: data_protection → vaults).
+        let seed = self
+            .data_protection
+            .lock()
+            .expect("protect mutex poisoned")
+            .clone();
         let mut vaults = self.vaults.lock().expect("vault mutex poisoned");
         let vault = vaults.entry(session.to_string()).or_insert_with(|| {
             let mut v = DataVault::new();
-            for s in &self.data_protection {
+            for s in &seed {
                 v.learn(s);
             }
             v
@@ -1332,6 +1384,43 @@ explain = "Sends an email on your behalf."
             "sidecar-detected PII leaked: {v}"
         );
         assert!(v["note"].as_str().unwrap().contains("[[GDN-"));
+    }
+
+    #[tokio::test]
+    async fn runtime_add_protected_reaches_an_already_open_session() {
+        let policy = CompiledPolicy::from_toml_str(
+            "version=1\nrole=\"t\"\n[defaults]\ndecision=\"ask\"\n[[rules]]\nid=\"all\"\nwhen='true'\ndecision=\"allow\"\n",
+        )
+        .unwrap();
+        struct AcmeUpstream;
+        #[async_trait::async_trait]
+        impl Upstream for AcmeUpstream {
+            async fn forward(&self, _: &ToolCall) -> Result<Value, String> {
+                Ok(json!({ "msg": "wire from Acme Corp to you" }))
+            }
+        }
+        let gw = Gateway::new(
+            "test",
+            policy,
+            Box::new(guardian_checker::StubChecker),
+            Box::new(AutoApprove),
+            Box::new(AcmeUpstream),
+            AuditLog::open_in_memory().unwrap(),
+            EvalEnv::default(),
+        )
+        .with_data_protection(vec!["seed-value".to_string()]);
+        // Open session "s1" first (its vault exists, knowing only the seed).
+        let _ = gw.handle(rd("read", json!({}), "s1")).await;
+        // Add a value at runtime (as the cockpit would); it must reach the open session.
+        gw.add_protected("Acme Corp");
+        let GatewayOutcome::Allowed(v) = gw.handle(rd("read", json!({}), "s1")).await else {
+            panic!()
+        };
+        assert!(
+            !v.to_string().contains("Acme Corp"),
+            "runtime-added value leaked: {v}"
+        );
+        assert_eq!(gw.vault_stats().0, 2, "two values should be protected");
     }
 
     #[tokio::test]

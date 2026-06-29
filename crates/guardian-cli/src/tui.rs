@@ -47,6 +47,8 @@ enum View {
     History,
     /// A form to create a token for a site (stored in the OS keychain).
     NewToken,
+    /// A form to add a sensitive value to protect (the data vault / tokenization).
+    Protect,
 }
 
 /// Which field of the new-token form is being edited.
@@ -99,6 +101,12 @@ struct App {
     history_offset: usize,
     /// The new-token form state (used on the NewToken screen).
     form: TokenForm,
+    /// The value being typed on the Protect screen (data vault / tokenization).
+    protect_input: String,
+    /// Status message after a protect submit.
+    protect_message: String,
+    /// Data-vault status: (values protected, tokens issued), refreshed from the daemon.
+    vault: (usize, usize),
 }
 
 /// Entry point for `guardian ui`. With `demo`, shows sample actions and never
@@ -128,6 +136,9 @@ async fn run_loop(terminal: &mut DefaultTerminal, client: &DaemonClient, demo: b
         history: if demo { demo_history() } else { Vec::new() },
         history_offset: 0,
         form: TokenForm::new(),
+        protect_input: String::new(),
+        protect_message: String::new(),
+        vault: (0, 0),
     };
     let mut events = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_millis(400));
@@ -177,6 +188,10 @@ async fn refresh(app: &mut App, client: &DaemonClient) {
             app.history = history;
         }
     }
+    // Keep the data-vault status fresh for the Protect view.
+    if let Ok(vault) = client.vault_status().await {
+        app.vault = vault;
+    }
 }
 
 async fn handle_event(event: Event, app: &mut App, client: &DaemonClient) {
@@ -184,6 +199,37 @@ async fn handle_event(event: Event, app: &mut App, client: &DaemonClient) {
         // The new-token form captures all keys as text input.
         Event::Key(key) if key.kind == KeyEventKind::Press && app.view == View::NewToken => {
             handle_form_key(app, key.code);
+        }
+        // The protect form: type a sensitive value, Enter sends it to the data vault.
+        Event::Key(key) if key.kind == KeyEventKind::Press && app.view == View::Protect => {
+            match key.code {
+                KeyCode::Esc => app.view = View::Approvals,
+                KeyCode::Backspace => {
+                    app.protect_input.pop();
+                }
+                KeyCode::Enter => {
+                    let val = app.protect_input.trim().to_string();
+                    if !val.is_empty() {
+                        if app.demo {
+                            app.vault.0 += 1;
+                            app.protect_message = format!("(demo) would protect \"{val}\"");
+                        } else {
+                            match client.protect(&val).await {
+                                Ok((p, t)) => {
+                                    app.vault = (p, t);
+                                    app.protect_message = format!(
+                                        "now protecting {p} value(s) — the agent will see tokens"
+                                    );
+                                }
+                                Err(e) => app.protect_message = format!("error: {e}"),
+                            }
+                        }
+                        app.protect_input.clear();
+                    }
+                }
+                KeyCode::Char(c) => app.protect_input.push(c),
+                _ => {}
+            }
         }
         Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
             KeyCode::Char('q') | KeyCode::Esc => app.quit = true,
@@ -209,6 +255,12 @@ async fn handle_event(event: Event, app: &mut App, client: &DaemonClient) {
             KeyCode::Char('n') => {
                 app.view = View::NewToken;
                 app.form = TokenForm::new();
+            }
+            KeyCode::Char('v') => {
+                app.view = View::Protect;
+                app.protect_input.clear();
+                app.protect_message.clear();
+                refresh(app, client).await;
             }
             KeyCode::Tab => {
                 app.view = match app.view {
@@ -453,6 +505,13 @@ fn draw(frame: &mut Frame, app: &mut App) {
             key(" Esc ", DARK_GREEN),
             Span::raw(" cancel"),
         ])
+    } else if app.view == View::Protect {
+        Line::from(vec![
+            key(" Enter ", BRIGHT_GREEN),
+            Span::raw(" protect value  "),
+            key(" Esc ", DARK_GREEN),
+            Span::raw(" cancel"),
+        ])
     } else {
         Line::from(vec![
             key(" j/k ", DARK_GREEN),
@@ -465,6 +524,8 @@ fn draw(frame: &mut Frame, app: &mut App) {
             Span::raw(" panic  "),
             key(" n ", BRIGHT_GREEN),
             Span::raw(" new token  "),
+            key(" v ", BRIGHT_GREEN),
+            Span::raw(" protect  "),
             key(" Tab ", DARK_GREEN),
             Span::raw(" archive  "),
             key(" r ", DARK_GREEN),
@@ -499,6 +560,7 @@ fn draw_body(frame: &mut Frame, area: Rect, app: &mut App) {
         View::Approvals => draw_approvals(frame, area, app),
         View::History => draw_history(frame, area, app),
         View::NewToken => draw_new_token(frame, area, app),
+        View::Protect => draw_protect(frame, area, app),
     }
 }
 
@@ -566,6 +628,64 @@ fn draw_new_token(frame: &mut Frame, area: Rect, app: &App) {
         .border_style(Style::new().fg(DARK_GREEN))
         .title(Span::styled(
             " new token ",
+            Style::new().fg(MID_YELLOW).bold(),
+        ));
+    frame.render_widget(Paragraph::new(lines).block(block), area);
+}
+
+/// The "protect data" form: type a sensitive value (name, IBAN, account…). Guardian
+/// replaces it with an opaque token in tool results so the agent never holds it, and
+/// restores it only into an authorized outbound action (ADR-0005).
+fn draw_protect(frame: &mut Frame, area: Rect, app: &App) {
+    let (protected, tokens) = app.vault;
+    let shown = if app.protect_input.is_empty() {
+        "____________________".to_string()
+    } else {
+        app.protect_input.clone()
+    };
+    let value_style = if app.protect_input.is_empty() {
+        Style::new().fg(DARK_GREEN)
+    } else {
+        Style::new().fg(Color::White)
+    };
+    let mut lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Protect a value — Guardian tokenizes it so the agent never sees it,",
+            Style::new().fg(DARK_GREEN),
+        )),
+        Line::from(Span::styled(
+            "  and restores it only into an authorized action (e.g. name, IBAN, account).",
+            Style::new().fg(DARK_GREEN),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  value      [", Style::new().fg(MID_YELLOW).bold()),
+            Span::styled(format!("{shown}_"), value_style),
+            Span::styled("]", Style::new().fg(MID_YELLOW).bold()),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("  vault: {protected} value(s) protected · {tokens} token(s) issued"),
+            Style::new().fg(BRIGHT_GREEN),
+        )),
+    ];
+    if !app.protect_message.is_empty() {
+        let color = if app.protect_message.starts_with("error") {
+            BRIGHT_RED
+        } else {
+            BRIGHT_GREEN
+        };
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            format!("  {}", app.protect_message),
+            Style::new().fg(color).bold(),
+        )));
+    }
+    let block = Block::bordered()
+        .border_style(Style::new().fg(DARK_GREEN))
+        .title(Span::styled(
+            " protect data ",
             Style::new().fg(MID_YELLOW).bold(),
         ));
     frame.render_widget(Paragraph::new(lines).block(block), area);
@@ -805,6 +925,9 @@ mod tests {
             history: Vec::new(),
             history_offset: 0,
             form: TokenForm::new(),
+            protect_input: String::new(),
+            protect_message: String::new(),
+            vault: (0, 0),
         }
     }
 
@@ -854,6 +977,19 @@ mod tests {
         assert!(text.contains("bank.example"));
         assert!(text.contains("*********")); // secret shown masked
         assert!(!text.contains("topsecret")); // never echoed
+    }
+
+    #[test]
+    fn protect_view_renders_input_and_vault_status() {
+        let mut state = app(Vec::new(), "0 pending");
+        state.view = View::Protect;
+        state.protect_input = "Mario Rossi".to_string();
+        state.vault = (3, 7);
+        let text = rendered(&mut state);
+        assert!(text.contains("protect data"));
+        assert!(text.contains("Mario Rossi")); // the value being typed is shown
+        assert!(text.contains("3 value(s) protected"));
+        assert!(text.contains("7 token(s) issued"));
     }
 
     #[test]
