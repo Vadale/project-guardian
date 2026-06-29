@@ -47,7 +47,13 @@ operating system for control).
 
 ## Quickstart
 
-Requires the [Rust toolchain](https://rustup.rs).
+**Fastest — download a prebuilt binary** (no toolchain needed) from the
+[latest release](https://github.com/Vadale/project-guardian/releases/latest).
+It's unsigned, so the OS asks once: macOS → right-click → *Open*; Windows →
+SmartScreen → *More info → Run anyway*; Linux → `chmod +x guardian`. Then `guardian --help`.
+(Windows is experimental/untested — see [`docs/user-guide.md`](docs/user-guide.md).)
+
+**Or build from source** — requires the [Rust toolchain](https://rustup.rs):
 
 ```sh
 cargo build --release
