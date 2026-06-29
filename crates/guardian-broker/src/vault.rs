@@ -29,7 +29,6 @@ pub struct DataVault {
     known: Vec<String>,
     by_id: HashMap<String, String>,
     by_value: HashMap<String, String>,
-    next: u64,
 }
 
 impl DataVault {
@@ -45,35 +44,58 @@ impl DataVault {
         }
     }
 
-    /// Mint (or reuse) a stable opaque token for `value`.
+    /// Mint (or reuse) an opaque token for `value`. Ids are **random and
+    /// unguessable** (128-bit CSPRNG) so a hijacked agent cannot enumerate or forge
+    /// token references to make Guardian expand values it was never shown.
     fn token_for(&mut self, value: &str) -> String {
         if let Some(id) = self.by_value.get(value) {
             return format!("{PREFIX}{id}{SUFFIX}");
         }
-        let id = format!("{:x}", self.next);
-        self.next += 1;
+        let id = random_id();
         self.by_id.insert(id.clone(), value.to_string());
         self.by_value.insert(value.to_string(), id.clone());
         format!("{PREFIX}{id}{SUFFIX}")
     }
 
-    /// Replace known sensitive values and Luhn-valid card numbers with opaque tokens.
+    /// Replace known sensitive values (ASCII-case-insensitive) and Luhn-valid card
+    /// numbers with opaque tokens. Single pass over **non-overlapping** spans of the
+    /// original text, so a learned substring of a card can never leave a residual, and
+    /// an inserted token can never be corrupted by a later replacement.
     pub fn tokenize(&mut self, text: &str) -> String {
-        // Longest known value first, so an overlapping value is tokenized whole.
-        let mut known = self.known.clone();
-        known.sort_by_key(|k| std::cmp::Reverse(k.len()));
-        let mut out = text.to_string();
-        for v in known {
-            if out.contains(&v) {
-                let tok = self.token_for(&v);
-                out = out.replace(&v, &tok);
-            }
+        // Collect candidate spans on the *original* text.
+        let mut spans: Vec<(usize, usize)> = Vec::new();
+        for v in &self.known {
+            spans.extend(find_all_ci(text, v));
         }
-        self.tokenize_cards(&out)
+        spans.extend(find_card_spans(text));
+        // Earliest start first; on a tie, the longer span wins (whole card over a
+        // learned sub-span). Then greedily keep non-overlapping spans.
+        spans.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
+        let mut out = String::with_capacity(text.len());
+        let mut pos = 0;
+        for (s, e) in spans {
+            if s < pos {
+                continue; // overlaps an already-tokenized span
+            }
+            out.push_str(&text[pos..s]);
+            let tok = self.token_for(&text[s..e]);
+            out.push_str(&tok);
+            pos = e;
+        }
+        out.push_str(&text[pos..]);
+        out
     }
 
     /// Restore tokens to their real values — call **only** when writing the authorized
     /// egress action. An unknown token id is left untouched (fail safe: never invent data).
+    ///
+    /// SECURITY: token ids are random/unguessable, so the agent cannot *forge* a
+    /// reference; but a value tokenized in one context could be *replayed* if the agent
+    /// observed its token and the same vault is shared across sessions/principals.
+    /// Before wiring this to a live egress path, the vault MUST be scoped per session
+    /// (and ideally per action), so a token only resolves in the context that minted it
+    /// (ADR-0005 open question — resolve to per-session). Do not feed agent-composed
+    /// free text to a process-wide/persistent vault.
     pub fn detokenize(&self, text: &str) -> String {
         let mut out = String::with_capacity(text.len());
         let mut rest = text;
@@ -105,56 +127,76 @@ impl DataVault {
         out.push_str(rest);
         out
     }
-
-    /// Detect and tokenize maximal `[0-9 -]` runs that hold 13–19 digits and pass Luhn.
-    fn tokenize_cards(&mut self, text: &str) -> String {
-        let bytes = text.as_bytes();
-        let mut out = String::with_capacity(text.len());
-        let mut i = 0;
-        while i < bytes.len() {
-            let c = bytes[i];
-            if c.is_ascii_digit() {
-                // collect a maximal run of digits / single spaces / dashes
-                let start = i;
-                let mut j = i;
-                while j < bytes.len()
-                    && (bytes[j].is_ascii_digit() || bytes[j] == b' ' || bytes[j] == b'-')
-                {
-                    j += 1;
-                }
-                let run = &text[start..j];
-                let digits: String = run.chars().filter(|c| c.is_ascii_digit()).collect();
-                if (13..=19).contains(&digits.len()) && luhn_ok(&digits) {
-                    let tok = self.token_for(run.trim());
-                    // preserve any leading/trailing separator the trim removed
-                    let lead = &run[..run.len() - run.trim_start().len()];
-                    let trail = &run[run.trim_end().len()..];
-                    out.push_str(lead);
-                    out.push_str(&tok);
-                    out.push_str(trail);
-                } else {
-                    out.push_str(run);
-                }
-                i = j;
-            } else {
-                // push this (possibly multi-byte) char unchanged
-                let ch_len = utf8_len(c);
-                out.push_str(&text[i..i + ch_len]);
-                i += ch_len;
-            }
-        }
-        out
-    }
 }
 
-/// Byte length of a UTF-8 sequence given its leading byte.
-fn utf8_len(b: u8) -> usize {
-    match b {
-        0x00..=0x7F => 1,
-        0xC0..=0xDF => 2,
-        0xE0..=0xEF => 3,
-        _ => 4,
+/// A random, unguessable 128-bit token id (hex). Unforgeable so the agent cannot
+/// enumerate ids; falls back to a non-secret marker only if the CSPRNG is unavailable
+/// (never reuses a guessable counter).
+fn random_id() -> String {
+    let mut b = [0u8; 16];
+    if getrandom::getrandom(&mut b).is_err() {
+        // CSPRNG unavailable — extremely unlikely; use a clearly-marked unique-ish id.
+        return format!("x{:p}", &b as *const _);
     }
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+/// Byte spans of every ASCII-case-insensitive occurrence of `needle` in `haystack`.
+/// ASCII case-folding preserves byte length, so spans stay on char boundaries.
+fn find_all_ci(haystack: &str, needle: &str) -> Vec<(usize, usize)> {
+    let n = needle.len();
+    if n == 0 || n > haystack.len() {
+        return Vec::new();
+    }
+    let hb = haystack.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i + n <= hb.len() {
+        if hb[i..i + n].eq_ignore_ascii_case(needle.as_bytes())
+            && haystack.is_char_boundary(i)
+            && haystack.is_char_boundary(i + n)
+        {
+            out.push((i, i + n));
+            i += n; // non-overlapping
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
+/// Byte spans of maximal `[0-9 -]` runs (trimmed to the digit extent) that hold 13–19
+/// digits and pass Luhn — i.e. credit-card numbers.
+fn find_card_spans(text: &str) -> Vec<(usize, usize)> {
+    let bytes = text.as_bytes();
+    let mut spans = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i].is_ascii_digit() {
+            let start = i;
+            let mut j = i;
+            let mut last_digit = i;
+            while j < bytes.len()
+                && (bytes[j].is_ascii_digit() || bytes[j] == b' ' || bytes[j] == b'-')
+            {
+                if bytes[j].is_ascii_digit() {
+                    last_digit = j;
+                }
+                j += 1;
+            }
+            let digits: String = text[start..j]
+                .chars()
+                .filter(|c| c.is_ascii_digit())
+                .collect();
+            if (13..=19).contains(&digits.len()) && luhn_ok(&digits) {
+                spans.push((start, last_digit + 1));
+            }
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+    spans
 }
 
 /// Luhn checksum over an all-digit string.
@@ -239,6 +281,47 @@ mod tests {
             v.tokenize(txt),
             txt,
             "must not tokenize non-card numbers / plain text"
+        );
+    }
+
+    #[test]
+    fn known_value_match_is_case_insensitive() {
+        let mut v = DataVault::new();
+        v.learn("Mario Rossi");
+        let red = v.tokenize("From MARIO ROSSI and mario rossi");
+        assert!(
+            !red.to_ascii_lowercase().contains("mario rossi"),
+            "name leaked: {red}"
+        );
+        assert_eq!(v.detokenize(&red), "From MARIO ROSSI and mario rossi");
+    }
+
+    #[test]
+    fn learning_a_card_substring_leaves_no_residual_digits() {
+        // MEDIUM-1 regression: a learned sub-span of a card must not break the run and
+        // leave the rest of the digits in clear — the whole card span wins.
+        let mut v = DataVault::new();
+        v.learn("4111"); // a prefix of the card below
+        let red = v.tokenize("card 4111111111111111 end");
+        assert!(!red.contains("4111"), "residual card digits leaked: {red}");
+        assert_eq!(v.detokenize(&red), "card 4111111111111111 end");
+    }
+
+    #[test]
+    fn token_ids_are_random_not_sequential() {
+        let mut v = DataVault::new();
+        v.learn("Alice Anderson");
+        v.learn("Bob Brown");
+        let red = v.tokenize("Alice Anderson and Bob Brown");
+        // a hijacked agent must not be able to forge [[GDN-0]] / [[GDN-1]]
+        assert!(
+            !red.contains("[[GDN-0]]") && !red.contains("[[GDN-1]]"),
+            "ids look sequential: {red}"
+        );
+        assert_eq!(
+            v.detokenize("[[GDN-0]]"),
+            "[[GDN-0]]",
+            "guessed id must not resolve"
         );
     }
 

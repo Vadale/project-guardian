@@ -115,7 +115,9 @@ pub fn tag_exfiltration(action: &mut Action, trusted_hosts: &[String]) {
         .host
         .as_deref()
         .is_some_and(|h| trusted_hosts.iter().any(|t| t == h));
-    if !to_trusted {
+    // Only tag when no capability was already inferred, so we never clobber a more
+    // specific class (e.g. Payment) — both are critical, so the floor fires regardless.
+    if !to_trusted && action.capability.is_none() {
         action.capability = Some(Capability::Exfiltration);
     }
 }

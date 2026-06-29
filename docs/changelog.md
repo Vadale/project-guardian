@@ -24,7 +24,14 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 - **GuardianBench v0.2** — adds a **redaction/tokenization** dimension: feeds PII-bearing
   text through `guardian redact` and scores PII leaks (FN, target 0%) and over-redaction.
   Latest: decisions 26/26 (FN/FP 0%, refusal 100%) + redaction 0% leaks / 0% over-redact.
-  186 tests; fmt/clippy/deny green.
+- **Security-audit hardening of the vault** (pre-merge review, no Critical): token ids
+  are now **random/unguessable** (128-bit CSPRNG) so a hijacked agent cannot forge
+  `[[GDN-0]]` references (was a sequential counter); `tokenize` is a **single non-overlapping
+  span pass** so learning a *substring* of a card no longer leaves residual digits;
+  known-value matching is **ASCII-case-insensitive** (`MARIO ROSSI` no longer leaks);
+  `tag_exfiltration` only sets a capability when none is present. `detokenize` documents
+  the **per-session-scoping prerequisite** before it is wired to a live egress path
+  (replay across contexts). 189 tests; fmt/clippy/deny green.
 
 ### Decided — 2026-06-29 (ADR-0005: privacy data-handling)
 - **ADR-0005**: split by criticality. **Own** the *vault + structured-PII tokenization*
