@@ -274,6 +274,8 @@ mod server {
         },
         /// Add a sensitive value to tokenize before the agent sees it (data vault, ADR-0005).
         Protect { value: String },
+        /// Remove the most-recently-added protected value (cockpit undo).
+        Unprotect,
         /// Report data-vault status: how many values are protected and tokens issued.
         VaultStatus,
     }
@@ -282,10 +284,19 @@ mod server {
         50
     }
 
-    /// Parse `(protected, tokens)` from a `Vault` response object.
-    fn vault_pair(v: &serde_json::Value) -> (usize, usize) {
+    /// Parse `(protected, tokens, masked_values)` from a `Vault` response object.
+    fn vault_triple(v: &serde_json::Value) -> (usize, usize, Vec<String>) {
         let n = |k: &str| v.get(k).and_then(serde_json::Value::as_u64).unwrap_or(0) as usize;
-        (n("protected"), n("tokens"))
+        let values = v
+            .get("values")
+            .and_then(|x| x.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        (n("protected"), n("tokens"), values)
     }
 
     /// One row of the activity archive, for the cockpit's history view.
@@ -333,6 +344,9 @@ mod server {
         Vault {
             protected: usize,
             tokens: usize,
+            /// Masked protected values for display (never the raw values).
+            #[serde(default)]
+            values: Vec<String>,
         },
         Error {
             message: String,
@@ -529,13 +543,23 @@ mod server {
             }
             Request::Protect { value } => {
                 gateway.add_protected(value);
-                let (protected, tokens) = gateway.vault_stats();
-                Response::Vault { protected, tokens }
+                vault_response(gateway)
             }
-            Request::VaultStatus => {
-                let (protected, tokens) = gateway.vault_stats();
-                Response::Vault { protected, tokens }
+            Request::Unprotect => {
+                gateway.remove_last_protected();
+                vault_response(gateway)
             }
+            Request::VaultStatus => vault_response(gateway),
+        }
+    }
+
+    /// Build the `Vault` status response (counts + masked values).
+    fn vault_response(gateway: &Gateway) -> Response {
+        let (protected, tokens) = gateway.vault_stats();
+        Response::Vault {
+            protected,
+            tokens,
+            values: gateway.protected_masked(),
         }
     }
 
@@ -589,17 +613,23 @@ mod server {
         }
 
         /// Add a sensitive value to the data vault (tokenized before the agent sees it).
-        /// Returns the resulting `(values protected, tokens issued)`.
-        pub async fn protect(&self, value: &str) -> std::io::Result<(usize, usize)> {
+        /// Returns `(values protected, tokens issued, masked values)`.
+        pub async fn protect(&self, value: &str) -> std::io::Result<(usize, usize, Vec<String>)> {
             let request = serde_json::json!({ "cmd": "protect", "value": value }).to_string();
             let v = self.rpc(&request).await?;
-            Ok(vault_pair(&v))
+            Ok(vault_triple(&v))
         }
 
-        /// Data-vault status: `(values protected, tokens issued)`.
-        pub async fn vault_status(&self) -> std::io::Result<(usize, usize)> {
+        /// Remove the most-recently-added protected value (undo).
+        pub async fn unprotect(&self) -> std::io::Result<(usize, usize, Vec<String>)> {
+            let v = self.rpc(r#"{"cmd":"unprotect"}"#).await?;
+            Ok(vault_triple(&v))
+        }
+
+        /// Data-vault status: `(values protected, tokens issued, masked values)`.
+        pub async fn vault_status(&self) -> std::io::Result<(usize, usize, Vec<String>)> {
             let v = self.rpc(r#"{"cmd":"vault_status"}"#).await?;
-            Ok(vault_pair(&v))
+            Ok(vault_triple(&v))
         }
 
         /// Enqueue an approval request and block until the cockpit resolves it

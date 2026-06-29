@@ -107,6 +107,8 @@ struct App {
     protect_message: String,
     /// Data-vault status: (values protected, tokens issued), refreshed from the daemon.
     vault: (usize, usize),
+    /// Masked protected values for display in the Protect view (never raw).
+    vault_values: Vec<String>,
 }
 
 /// Entry point for `guardian ui`. With `demo`, shows sample actions and never
@@ -139,6 +141,7 @@ async fn run_loop(terminal: &mut DefaultTerminal, client: &DaemonClient, demo: b
         protect_input: String::new(),
         protect_message: String::new(),
         vault: (0, 0),
+        vault_values: Vec::new(),
     };
     let mut events = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_millis(400));
@@ -189,8 +192,9 @@ async fn refresh(app: &mut App, client: &DaemonClient) {
         }
     }
     // Keep the data-vault status fresh for the Protect view.
-    if let Ok(vault) = client.vault_status().await {
-        app.vault = vault;
+    if let Ok((protected, tokens, values)) = client.vault_status().await {
+        app.vault = (protected, tokens);
+        app.vault_values = values;
     }
 }
 
@@ -204,6 +208,17 @@ async fn handle_event(event: Event, app: &mut App, client: &DaemonClient) {
         Event::Key(key) if key.kind == KeyEventKind::Press && app.view == View::Protect => {
             match key.code {
                 KeyCode::Esc => app.view = View::Approvals,
+                // Backspace on an empty field removes the last protected value (undo).
+                KeyCode::Backspace if app.protect_input.is_empty() => {
+                    if app.demo {
+                        app.vault.0 = app.vault.0.saturating_sub(1);
+                        app.protect_message = "(demo) removed last".to_string();
+                    } else if let Ok((p, t, values)) = client.unprotect().await {
+                        app.vault = (p, t);
+                        app.vault_values = values;
+                        app.protect_message = format!("removed last — {p} value(s) protected");
+                    }
+                }
                 KeyCode::Backspace => {
                     app.protect_input.pop();
                 }
@@ -215,8 +230,9 @@ async fn handle_event(event: Event, app: &mut App, client: &DaemonClient) {
                             app.protect_message = format!("(demo) would protect \"{val}\"");
                         } else {
                             match client.protect(&val).await {
-                                Ok((p, t)) => {
+                                Ok((p, t, values)) => {
                                     app.vault = (p, t);
+                                    app.vault_values = values;
                                     app.protect_message = format!(
                                         "now protecting {p} value(s) — the agent will see tokens"
                                     );
@@ -509,6 +525,8 @@ fn draw(frame: &mut Frame, app: &mut App) {
         Line::from(vec![
             key(" Enter ", BRIGHT_GREEN),
             Span::raw(" protect value  "),
+            key(" Bksp ", DARK_GREEN),
+            Span::raw(" remove last  "),
             key(" Esc ", DARK_GREEN),
             Span::raw(" cancel"),
         ])
@@ -670,6 +688,19 @@ fn draw_protect(frame: &mut Frame, area: Rect, app: &App) {
             Style::new().fg(BRIGHT_GREEN),
         )),
     ];
+    // Masked list of what's protected (never the raw values).
+    for m in &app.vault_values {
+        lines.push(Line::from(Span::styled(
+            format!("    • {m}"),
+            Style::new().fg(DARK_GREEN),
+        )));
+    }
+    if app.vault_values.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "    (nothing protected yet — also seedable from config: protect = [..])",
+            Style::new().fg(DARK_GREEN),
+        )));
+    }
     if !app.protect_message.is_empty() {
         let color = if app.protect_message.starts_with("error") {
             BRIGHT_RED
@@ -928,6 +959,7 @@ mod tests {
             protect_input: String::new(),
             protect_message: String::new(),
             vault: (0, 0),
+            vault_values: Vec::new(),
         }
     }
 
@@ -985,11 +1017,13 @@ mod tests {
         state.view = View::Protect;
         state.protect_input = "Mario Rossi".to_string();
         state.vault = (3, 7);
+        state.vault_values = vec!["Ma*******si".to_string(), "IT******56".to_string()];
         let text = rendered(&mut state);
         assert!(text.contains("protect data"));
         assert!(text.contains("Mario Rossi")); // the value being typed is shown
         assert!(text.contains("3 value(s) protected"));
         assert!(text.contains("7 token(s) issued"));
+        assert!(text.contains("Ma*******si")); // masked protected value listed
     }
 
     #[test]

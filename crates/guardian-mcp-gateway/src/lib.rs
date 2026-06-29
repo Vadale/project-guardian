@@ -180,6 +180,18 @@ fn normalize_abs(path: &Path) -> PathBuf {
     out
 }
 
+/// Mask a sensitive value for display: keep a little head/tail, hide the middle, so
+/// the cockpit can show *what* is protected without re-exposing the value.
+fn mask(s: &str) -> String {
+    let n = s.chars().count();
+    if n <= 4 {
+        return "*".repeat(n.max(1));
+    }
+    let head: String = s.chars().take(2).collect();
+    let tail: String = s.chars().skip(n - 2).collect();
+    format!("{head}{}{tail}", "*".repeat(n - 4))
+}
+
 /// The mediation gateway: ties the policy engine, Checker, audit log, an
 /// [`Approver`], and an [`Upstream`] together.
 pub struct Gateway {
@@ -290,6 +302,28 @@ impl Gateway {
             .map(|v| v.token_count())
             .sum();
         (protected, tokens)
+    }
+
+    /// The protected values, **masked** for display (never the raw values), so the
+    /// cockpit can show what's protected without re-exposing it.
+    pub fn protected_masked(&self) -> Vec<String> {
+        self.data_protection
+            .lock()
+            .expect("protect mutex poisoned")
+            .iter()
+            .map(|v| mask(v))
+            .collect()
+    }
+
+    /// Remove the most-recently-added protected value (the cockpit's undo). Returns
+    /// whether one was removed. Note: a value already learned into an open session's
+    /// vault keeps resolving there; this stops it being applied to new sessions.
+    pub fn remove_last_protected(&self) -> bool {
+        self.data_protection
+            .lock()
+            .expect("protect mutex poisoned")
+            .pop()
+            .is_some()
     }
 
     /// Tokenization runs when there is anything to redact: configured known values
@@ -1384,6 +1418,35 @@ explain = "Sends an email on your behalf."
             "sidecar-detected PII leaked: {v}"
         );
         assert!(v["note"].as_str().unwrap().contains("[[GDN-"));
+    }
+
+    #[test]
+    fn masked_list_hides_the_value_and_remove_last_works() {
+        let gw = Gateway::new(
+            "t",
+            CompiledPolicy::from_toml_str("version=1\nrole=\"t\"\n[defaults]\ndecision=\"ask\"\n[[rules]]\nid=\"a\"\nwhen='true'\ndecision=\"allow\"\n").unwrap(),
+            Box::new(guardian_checker::StubChecker),
+            Box::new(AutoApprove),
+            Box::new(RecordingUpstream { forwarded: Arc::new(Mutex::new(Vec::new())) }),
+            AuditLog::open_in_memory().unwrap(),
+            EvalEnv::default(),
+        )
+        .with_data_protection(vec!["Mario Rossi".to_string()]);
+        gw.add_protected("Giulia Bianchi");
+        let masked = gw.protected_masked();
+        assert_eq!(masked.len(), 2);
+        assert!(
+            masked.iter().all(|m| m.contains('*')),
+            "values must be masked: {masked:?}"
+        );
+        assert!(
+            !masked
+                .iter()
+                .any(|m| m.contains("Rossi") || m.contains("Bianchi")),
+            "raw value leaked"
+        );
+        assert!(gw.remove_last_protected());
+        assert_eq!(gw.vault_stats().0, 1);
     }
 
     #[tokio::test]

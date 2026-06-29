@@ -144,8 +144,15 @@ async fn main() -> std::io::Result<()> {
             open_audit(cfg.audit_path()),
             env,
         )
-        .with_self_protection(self_protection),
+        .with_self_protection(self_protection)
+        .with_data_protection(cfg.protect.clone()),
     );
+    if !cfg.protect.is_empty() {
+        tracing::info!(
+            count = cfg.protect.len(),
+            "data-vault: seeded protected values from config"
+        );
+    }
 
     let path = cfg.socket_path();
     tracing::info!(socket = %path.display(), "guardian-daemon listening (newline-delimited JSON control protocol)");
