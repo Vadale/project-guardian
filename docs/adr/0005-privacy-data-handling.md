@@ -27,39 +27,61 @@ A prior-art scan (Presidio, LLM Guard, data-privacy vaults) showed these are a *
 MIT-licensed, self-hosted** category — not something to reinvent.
 
 ## Decision
-1. **Tokenization (data broker) and output-DLP → integrate, do not build.** Use
-   off-the-shelf, self-hosted, MIT-licensed engines:
-   - **LLM Guard** (Protect AI) — `Anonymize` input scanner (PII → placeholders, real
-     values held in a Vault) + `Deanonymize` output scanner (restore at egress). This is
-     the *Anonymize → agent → De-anonymize* pattern verbatim.
-   - **Microsoft Presidio** — the underlying detection + reversible anonymization engine.
-   - Optional persistent vault (beyond a session): **Databunker** / **Open Privacy Vault**.
-   They run as a **sidecar service** (they are Python; Guardian is Rust) called over a
-   process/HTTP boundary at Guardian's existing **inbound "sanitize tool results" hook**
-   (§5.1, tokenize before the agent sees the data) and an **outbound output-guard**
-   (redact before a response leaves). No Rust dependency, no `cargo-deny` license edge.
-2. **Guardian owns what the libraries do not:** the **deterministic policy** deciding
-   *when/what* to tokenize or detokenize, **trusted custody** of the token↔value vault
-   and keys (the broker generalized), **agent-agnostic interception**, and the
-   **tamper-evident audit**. Guardian is the orchestrator + enforcement + audit; the
-   libraries are the detection/anonymization engine. They are complementary, not competing.
-3. **Scoping rule (load-bearing):** tokenize values that are **carried** (identifiers
+**Split the work by criticality** — own the simple, security-critical part in Rust;
+delegate the hard, ML, advisory part to an off-the-shelf sidecar. Do **not** embed a
+Python ML stack into the deterministic Rust core, and do **not** fork the engines.
+
+1. **Vault + structured-PII tokenization → own it, in native Rust, inside Guardian.**
+   This is the security-critical, *simple* part, and it is the **broker generalized** from
+   credentials to any carried sensitive value. The values we tokenize are **carried
+   identifiers** (IBAN, card, phone, email, account number, bank name) which are
+   **structured / regex-detectable**, so a small native Rust module does it with **no
+   Python**: tokenize at the inbound "sanitize tool results" hook (§5.1), hold the
+   token↔value map in the broker's keychain-backed custody, detokenize **only** into the
+   authorized egress action. This is exactly the "manage it directly in Guardian" we want.
+2. **Fuzzy NER on free text + output-DLP → optional sidecar (do not build, do not embed).**
+   Detecting names/PII in free-form prose is the hard ML part where the mature engines earn
+   their keep — **Microsoft Presidio** (MIT; detection + reversible anonymization) and/or
+   **LLM Guard** (MIT; `Anonymize`/`Deanonymize` + Vault). They are **Python**; Guardian is
+   **Rust** → run them as a **sidecar** called over a process/HTTP boundary (no Rust
+   dependency, no `cargo-deny` edge). This layer is **advisory**: a miss fails safe to the
+   restrictive default + the deterministic secret-exfiltration **deny rule** backstop, so it
+   must **not** live in the deterministic core. Extend them via their **plugin APIs**
+   (Presidio recognizers, LLM Guard scanners/vault) rather than **forking** — a fork would
+   saddle us with tracking their upstream security patches.
+3. **Guardian owns what the libraries do not:** the **deterministic policy** deciding
+   *when/what* to tokenize or detokenize, **trusted custody** of the token↔value vault and
+   keys (the broker), **agent-agnostic interception**, and the **tamper-evident audit**.
+   Guardian is the orchestrator + enforcement + audit + the Rust vault; the sidecar is only
+   the fuzzy-detection engine. They are complementary, not competing.
+4. **Scoping rule (load-bearing):** tokenize values that are **carried** (identifiers
    inserted into a form / message / call — name, IBAN, phone, email, bank name), **not**
    content the agent must **reason over** (a document to summarise, a decision input).
    Over-tokenizing breaks the agent; under-tokenizing leaks. (Industry mitigates with a
    semantic-boundary classifier; we inherit that problem, we do not escape it.)
-4. **Context-window minimization is the agent/harness's job, not Guardian's.** Guardian
+5. **Context-window minimization is the agent/harness's job, not Guardian's.** Guardian
    does not own the model's context. Its contribution is (a) the inbound tokenization
    above and (b) its **append-only log as durable external memory** the integration may
    recall from. We will *not* try to make the model "forget," which conflicts with the
    agent's need to chain steps.
-5. **Build our own only as a fallback** if integration proves infeasible — and even then,
-   thinly (the vault + a redaction shim), never reinventing NER.
+
+## Alternatives considered
+- **Fork + embed the engines directly into Guardian.** Rejected for the *detection* part:
+  Presidio/LLM Guard are Python, so "embedding" means either a full Rust reimplementation
+  (years of NER work) or shipping a Python interpreter + hundreds of MB of ML models inside
+  the deterministic Rust core (PyO3) — bloating the small, fast, auditable security boundary
+  with a non-auditable ML dependency. A fork also means owning their upstream security
+  patches. We instead **own the simple critical part (vault + structured tokenization) in
+  native Rust** and treat the fuzzy detector as a replaceable advisory sidecar.
+- **Make the model "forget" between actions.** Rejected: conflicts with the agent's need to
+  chain steps; and Guardian does not own the model's context (it is the agent/harness's layer).
 
 ## Consequences
-- **No reinvention** of a mature, MIT category; Guardian stays the thin, auditable,
-  deterministic core. Aligns with README §9 ("off-the-shelf backstops, not the primary
-  control") and invariant #6.
+- **Right-sized ownership.** Guardian owns the *simple critical* part (vault + structured
+  tokenization) in native Rust — auditable, fast, no Python — and does **not reinvent** the
+  hard ML detection (delegated to a replaceable MIT sidecar). Aligns with README §9
+  ("off-the-shelf backstops, not the primary control") and invariant #6 (user-space, thin
+  core).
 - **Invariant #1 preserved:** detection/redaction is advisory-grade and stays **off** the
   deterministic allow/deny path; the existing secret-exfiltration **deny rule remains the
   deterministic backstop**. Tokenization is "minimize what the agent holds" — the data
