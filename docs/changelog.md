@@ -7,6 +7,23 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 
 ## [Unreleased]
 
+### Added — 2026-06-29 (onboarding: `guardian init`, MCP snippet, desktop notifications)
+- **`guardian init`** — one-command setup. Creates `~/.guardian/{config.toml,policy.toml}`
+  (owner-only) for `--role coding-agent` (default) or `personal-assistant`, wires the
+  config's `policy` at the installed pack (no env vars needed), and prints the next
+  steps + a **copy-paste MCP client snippet** (Claude Code / Cursor / any MCP client).
+  Idempotent (won't clobber unless `--force`); starter packs embedded so it works from a
+  downloaded binary. Testable core `init_files` + `mcp_snippet`.
+- **Desktop notifications** — when an action needs approval the daemon fires a
+  best-effort desktop notification (new `notify.rs`), so the cockpit need not be watched.
+  Wired at `ApprovalQueue::request` (covers gateway `ask` + external `Approve`), gated by
+  the new `notifications` config field (default on) via `ApprovalQueue::with_notifications`.
+  Never on the decision path, fails open (invariant #5); no new dependency — shells out to
+  `osascript` / `notify-send` / PowerShell toast. README Quickstart updated.
+- **Dependency:** bumped `anyhow` 1.0.102 → 1.0.103 to clear RUSTSEC-2026-0190
+  (`Error::downcast_mut` unsoundness); `cargo deny` green again.
+- 203 tests; fmt/clippy/deny green.
+
 ### Added — 2026-06-29 (README hero demo)
 - A narrated terminal demo recorded with [VHS](https://github.com/charmbracelet/vhs),
   embedded at the top of the README: the deterministic traffic light (allow / ask / deny,

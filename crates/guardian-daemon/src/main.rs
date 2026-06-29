@@ -94,7 +94,12 @@ async fn main() -> std::io::Result<()> {
             "trusted_hosts configured — these are exempt from host-gated critical rules"
         );
     }
-    let queue = Arc::new(ApprovalQueue::new(cfg.approval_timeout()));
+    let queue = Arc::new(
+        ApprovalQueue::new(cfg.approval_timeout()).with_notifications(cfg.notifications_enabled()),
+    );
+    if cfg.notifications_enabled() {
+        tracing::info!("desktop notifications on for actions that need approval (best-effort)");
+    }
     let approver = QueueApprover::new(queue.clone());
 
     // Self-protection: refuse to write/delete Guardian's own files, and honor the

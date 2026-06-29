@@ -31,6 +31,18 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// One-command setup: create `~/.guardian/{config.toml,policy.toml}` and print
+    /// the next steps + the MCP client snippet to paste. Idempotent (won't clobber
+    /// existing files unless `--force`).
+    Init {
+        /// Which starter policy pack to install: `coding-agent` (default) or
+        /// `personal-assistant`.
+        #[arg(long, default_value = "coding-agent")]
+        role: String,
+        /// Overwrite existing config/policy files instead of keeping them.
+        #[arg(long)]
+        force: bool,
+    },
     /// Run a scripted demo of the traffic-light mediation, end to end.
     Demo,
     /// Parse, validate, and compile a policy file.
@@ -237,6 +249,7 @@ enum PackAction {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
+        Command::Init { role, force } => run_init(&role, force),
         Command::Demo => run_demo().await,
         Command::PolicyValidate { path } => validate_policy(&path),
         Command::Mcp {
@@ -300,6 +313,115 @@ async fn main() -> anyhow::Result<()> {
             cmd,
         } => run_exec(policy, audit, allow_network, writable, cmd),
     }
+}
+
+// Starter policy packs, embedded so `guardian init` works from a downloaded binary
+// with no source tree present.
+const PACK_CODING_AGENT: &str = include_str!("../../../policies/default/coding-agent.toml");
+const PACK_PERSONAL_ASSISTANT: &str =
+    include_str!("../../../policies/default/personal-assistant.toml");
+
+/// What `init` did, for printing and testing.
+struct InitReport {
+    config_written: bool,
+    policy_written: bool,
+}
+
+/// One-command setup. Create `<dir>/{config.toml,policy.toml}` for the chosen role,
+/// without clobbering existing files unless `force`. Pure file I/O so it is testable
+/// against a temp dir; presentation lives in [`run_init`].
+fn init_files(dir: &std::path::Path, role: &str, force: bool) -> anyhow::Result<InitReport> {
+    let pack = match role {
+        "coding-agent" => PACK_CODING_AGENT,
+        "personal-assistant" => PACK_PERSONAL_ASSISTANT,
+        other => anyhow::bail!(
+            "unknown role '{other}' (expected 'coding-agent' or 'personal-assistant')"
+        ),
+    };
+    std::fs::create_dir_all(dir)?;
+    restrict(dir, 0o700);
+
+    let policy_path = dir.join("policy.toml");
+    let policy_written = write_if_absent(&policy_path, pack, force)?;
+    restrict(&policy_path, 0o600);
+
+    // The config points at the policy we just wrote, so the daemon uses it without
+    // any environment variables.
+    let config = format!(
+        "{}policy = {:?}\n",
+        guardian_daemon::config::default_config_template(),
+        policy_path.display().to_string(),
+    );
+    let config_path = dir.join("config.toml");
+    let config_written = write_if_absent(&config_path, &config, force)?;
+    restrict(&config_path, 0o600);
+
+    Ok(InitReport {
+        config_written,
+        policy_written,
+    })
+}
+
+/// Write `contents` to `path` unless it already exists (and `!force`). Returns
+/// whether a write happened.
+fn write_if_absent(path: &std::path::Path, contents: &str, force: bool) -> anyhow::Result<bool> {
+    if path.exists() && !force {
+        return Ok(false);
+    }
+    std::fs::write(path, contents)?;
+    Ok(true)
+}
+
+/// Best-effort owner-only permissions (Unix); no-op elsewhere.
+#[cfg(unix)]
+fn restrict(path: &std::path::Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode));
+}
+#[cfg(not(unix))]
+fn restrict(_path: &std::path::Path, _mode: u32) {}
+
+/// `guardian init`: set up `~/.guardian` and print the next steps + MCP snippet.
+fn run_init(role: &str, force: bool) -> anyhow::Result<()> {
+    let dir = guardian_daemon::config::guardian_dir();
+    let report = init_files(&dir, role, force)?;
+
+    let mark = |written: bool| if written { "created" } else { "kept (exists)" };
+    println!("Guardian setup in {}", dir.display());
+    println!(
+        "  policy.toml   {}  (role: {role})",
+        mark(report.policy_written)
+    );
+    println!("  config.toml   {}", mark(report.config_written));
+
+    let sock = std::env::temp_dir().join("guardian.sock");
+    let sock = sock.display();
+    println!("\nNext steps — run these in separate terminals/panes:");
+    println!("  1) guardian-daemon                 # the service (reads ~/.guardian/config.toml)");
+    println!("  2) guardian ui                     # the approval cockpit (TUI)");
+    println!("  3) point your agent's MCP client at Guardian, then talk to it as usual.");
+
+    println!(
+        "\nMCP client snippet (Claude Code / Cursor / any MCP client — paste into its config):"
+    );
+    println!("{}", mcp_snippet(&sock.to_string()));
+    println!(
+        "Tip: if `guardian` is not on your PATH, replace it with the absolute path to the binary."
+    );
+    Ok(())
+}
+
+/// The copy-paste MCP server entry pointing a client at Guardian's daemon socket.
+fn mcp_snippet(sock: &str) -> String {
+    serde_json::to_string_pretty(&json!({
+        "mcpServers": {
+            "guardian": {
+                "command": "guardian",
+                "args": ["mcp", "--daemon", sock]
+            }
+        }
+    }))
+    .unwrap_or_default()
 }
 
 /// Decide an exec command against the policy and, if allowed, run it — sandboxed
@@ -1697,5 +1819,63 @@ mod broker_wiring_tests {
             .args
             .get("auth_token")
             .is_none());
+    }
+}
+
+#[cfg(test)]
+mod init_tests {
+    use super::*;
+
+    fn tmp_dir(tag: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("gdn-init-{}-{}", tag, std::process::id()))
+    }
+
+    #[test]
+    fn init_writes_config_and_policy_then_is_idempotent() {
+        let dir = tmp_dir("idem");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let r = init_files(&dir, "coding-agent", false).unwrap();
+        assert!(r.config_written && r.policy_written);
+        let policy = dir.join("policy.toml");
+        let config = dir.join("config.toml");
+        assert!(policy.exists() && config.exists());
+        // The written config must point the daemon at the policy we installed.
+        let cfg = std::fs::read_to_string(&config).unwrap();
+        assert!(cfg.contains("policy = ") && cfg.contains("policy.toml"));
+        // The installed policy is a real, compilable pack.
+        let pack = std::fs::read_to_string(&policy).unwrap();
+        guardian_policy::CompiledPolicy::from_toml_str(&pack).unwrap();
+
+        // Second run keeps existing files (idempotent).
+        let r2 = init_files(&dir, "coding-agent", false).unwrap();
+        assert!(!r2.config_written && !r2.policy_written);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn force_overwrites_and_unknown_role_errors() {
+        let dir = tmp_dir("force");
+        let _ = std::fs::remove_dir_all(&dir);
+        init_files(&dir, "personal-assistant", false).unwrap();
+        std::fs::write(dir.join("policy.toml"), "garbage").unwrap();
+
+        // --force rewrites the (now-corrupted) policy back to a valid pack.
+        let r = init_files(&dir, "personal-assistant", true).unwrap();
+        assert!(r.policy_written);
+        let pack = std::fs::read_to_string(dir.join("policy.toml")).unwrap();
+        guardian_policy::CompiledPolicy::from_toml_str(&pack).unwrap();
+
+        assert!(init_files(&dir, "bogus-role", false).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn mcp_snippet_is_valid_json_with_the_socket() {
+        let s = mcp_snippet("/tmp/guardian.sock");
+        let v: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(v["mcpServers"]["guardian"]["command"], "guardian");
+        assert_eq!(v["mcpServers"]["guardian"]["args"][2], "/tmp/guardian.sock");
     }
 }

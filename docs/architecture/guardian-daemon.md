@@ -21,6 +21,23 @@ fields are optional, so a missing or empty config yields safe defaults:
 - `approval_timeout_secs` — seconds before a pending approval fails closed
   (default: 120).
 - `trusted_hosts` — hosts the policy treats as trusted (default: none).
+- `protect` — sensitive values seeded into the data vault (default: none).
+- `notifications` — fire a best-effort desktop notification when an action needs
+  approval (default: **on**). Convenience only; see Notifications below.
+
+## Notifications (`notify.rs`)
+When an action resolves to `ask`, the daemon fires a **best-effort desktop
+notification** ("Guardian — approval needed: <tool>") so the cockpit need not be
+watched. It is wired at the single chokepoint `ApprovalQueue::request` (covering both
+the gateway's `ask` and the external-proxy `Approve` path) and gated by
+`ApprovalQueue::with_notifications(cfg.notifications_enabled())`.
+
+It is **never on the allow/deny path** and **fails open** (invariant #5): the
+notifier is fire-and-forget and any error (no GUI session, notifier absent) is
+ignored — the approval still waits in the queue/cockpit. To avoid a dependency (and
+keep `#![forbid(unsafe_code)]` and the cargo-deny surface unchanged) it shells out to
+the platform notifier: `osascript` (macOS), `notify-send` (Linux), a PowerShell WinRT
+toast (Windows, experimental). Strings are clipped on a char boundary and escaped.
 
 **Per-value precedence: built-in default < config file < `GUARDIAN_*` env var.**
 The resolver methods (`socket_path`, `policy_path`, `audit_path`,

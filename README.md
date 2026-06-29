@@ -73,6 +73,29 @@ It's unsigned, so the OS asks once: macOS → right-click → *Open*; Windows �
 SmartScreen → *More info → Run anyway*; Linux → `chmod +x guardian`. Then `guardian --help`.
 (Windows is experimental/untested — see [`docs/user-guide.md`](docs/user-guide.md).)
 
+**Set it up in one command.** `guardian init` creates `~/.guardian/{config.toml,policy.toml}`
+for your role and prints the exact next steps + the MCP snippet to paste:
+
+```sh
+guardian init                         # or: --role personal-assistant
+guardian-daemon                       # terminal 1 — the service
+guardian ui                           # terminal 2 — the approval cockpit (TUI)
+```
+
+Then point your agent's MCP client at Guardian (the snippet `guardian init` prints —
+works for Claude Code, Cursor, or any MCP client):
+
+```json
+{
+  "mcpServers": {
+    "guardian": { "command": "guardian", "args": ["mcp", "--daemon", "/tmp/guardian.sock"] }
+  }
+}
+```
+
+When an action needs your approval the daemon raises a **desktop notification**, so you
+don't have to watch the cockpit (set `notifications = false` in the config to disable).
+
 **Or build from source** — requires the [Rust toolchain](https://rustup.rs):
 
 ```sh

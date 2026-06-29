@@ -4,6 +4,13 @@ The `guardian` command-line interface and the terminal cockpit (TUI). A thin
 front-end over the other crates — no policy logic of its own.
 
 ## Subcommands
+- **`init [--role <coding-agent|personal-assistant>] [--force]`** — one-command
+  setup. Creates `~/.guardian/{config.toml,policy.toml}` (owner-only perms) for the
+  chosen role and prints the next steps + the **MCP client snippet** to paste (Claude
+  Code / Cursor / any MCP client). The written `config.toml` points `policy` at the
+  installed pack, so the daemon uses it with no environment variables. Idempotent:
+  existing files are kept unless `--force`. Starter packs are embedded (`include_str!`)
+  so it works from a downloaded binary with no source tree. Testable core: `init_files`.
 - **`demo`** — runs a scripted scenario through the in-process gateway and prints
   the traffic-light decisions (green allow, yellow review+approve, red block). No
   setup needed; uses an embedded demo policy + an auto-approver + a stub upstream.
