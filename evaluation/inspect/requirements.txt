@@ -1,0 +1,5 @@
+# Inspect AI + the inspect_evals suite (UK AI Safety Institute).
+# AgentDojo (Inspect port) and AgentThreatBench (OWASP Agentic Top-10) live here.
+inspect_ai
+# inspect_evals is installed from git; the agentdojo extra pulls the suite deps:
+#   pip install "inspect_evals[agentdojo] @ git+https://github.com/UKGovernmentBEIS/inspect_evals"

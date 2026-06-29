@@ -1,0 +1,16 @@
+# Guardian policy for the AgentDojo "workspace" suite (evaluation).
+# Least-privilege: read/search tools pass; sending email, sharing/creating/deleting
+# files, and changing the calendar are denied (the injection attacks abuse these to
+# exfiltrate data or destroy/alter state). Matched by tool name.
+version = 1
+role = "workspace-eval"
+
+[defaults]
+decision = "ask"
+
+[[rules]]
+id = "deny-send-share-delete-calendar"
+when = '''action.tool == "send_email" || action.tool == "share_file" || action.tool == "delete_email" || action.tool == "delete_file" || action.tool == "create_file" || action.tool == "append_to_file" || action.tool == "create_calendar_event" || action.tool == "cancel_calendar_event" || action.tool == "reschedule_calendar_event" || action.tool == "add_calendar_event_participants"'''
+decision = "deny"
+critical = true
+explain = "Sends email, shares/creates/deletes files, or changes your calendar."

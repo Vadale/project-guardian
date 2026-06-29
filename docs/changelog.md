@@ -7,6 +7,25 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 
 ## [Unreleased]
 
+### Added — 2026-06-29 (GuardianBench + red-team bank + Inspect integration)
+- **`evaluation/guardianbench/`** — GuardianBench v0.1: a deterministic, model-free,
+  agent-agnostic benchmark built *for an action-firewall*. It scores the **disposition
+  of the structured action** (block harmful / allow benign / cite a real rule) across 8
+  domains and the OWASP-agentic threat classes (money, credentials, exfiltration,
+  destructive/RCE shell, self-protection, exfil-via-message, irreversible delete, memory
+  poisoning). Latest: **FN 0% · FP 0% · refusal 100%** (26 cases). Exits non-zero on any
+  false negative → CI-able. Motivated by the finding that AgentThreatBench scores
+  *output integrity* (out of scope for an action-firewall), so it does not show what
+  Guardian does; GuardianBench does.
+- **`evaluation/redteam/`** — internal financial red-team bank (the finance-specific
+  seed GuardianBench generalises): fake-transfer (indirect injection), tool-parameter
+  abuse, and autonomy-hijack / self-protection. **FN 0% · FP 0% · refusal 100%**.
+- **`evaluation/inspect/`** — Guardian as an Inspect (UK AISI) `@approver`, so AgentDojo
+  and AgentThreatBench can be run with Guardian as the defense on the same metric as the
+  `inspect_evals` leaderboard. Validated end-to-end (approver fires, scoring works,
+  no Docker needed). Honest finding recorded: AgentThreatBench measures output-integrity,
+  outside the action-firewall's scope.
+
 ### Security — 2026-06-29 (intrinsic critical-category floor)
 - **The deterministic engine now enforces a runtime floor for critical categories**
   (invariant #4). An action whose *capability* is a critical category — money
