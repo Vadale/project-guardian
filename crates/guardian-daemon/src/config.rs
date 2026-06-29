@@ -43,6 +43,10 @@ pub struct Config {
     /// Seeded into the gateway at startup so they need not be re-typed in the cockpit.
     #[serde(default)]
     pub protect: Vec<String>,
+    /// Fire a best-effort desktop notification when an action needs human approval,
+    /// so the cockpit need not be watched. Default: on. Never on the decision path —
+    /// it is purely a convenience signal and fails open (a missing notifier is ignored).
+    pub notifications: Option<bool>,
 }
 
 #[derive(Debug, Error)]
@@ -92,7 +96,13 @@ const DEFAULT_CONFIG_TEMPLATE: &str = r#"# Project Guardian — daemon config.
 #   The full action (incl. args) is POSTed there — use a trusted, local endpoint.
 # trusted_hosts = ["api.example.com"]
 # protect = ["Mario Rossi", "IT60X0542811101000000123456"]   # values tokenized before the agent sees them (data vault)
+# notifications = true   # desktop alert when an action needs approval (set false to disable)
 "#;
+
+/// The commented default config written on first run / by `guardian init`.
+pub fn default_config_template() -> &'static str {
+    DEFAULT_CONFIG_TEMPLATE
+}
 
 impl Config {
     /// Load the config from `config_path()`. On first run (file absent) write a
@@ -170,6 +180,11 @@ impl Config {
             Ok(v) if !v.is_empty() => Some(v),
             _ => self.checker_endpoint.clone(),
         }
+    }
+
+    /// Whether to fire desktop notifications on `ask`. Default: on.
+    pub fn notifications_enabled(&self) -> bool {
+        self.notifications.unwrap_or(true)
     }
 }
 
@@ -261,6 +276,16 @@ mod tests {
         std::env::set_var("GUARDIAN_CONFIG", "/tmp/guardiantest/config.toml");
         assert_eq!(kill_switch_path(), PathBuf::from("/tmp/guardiantest/STOP"));
         std::env::remove_var("GUARDIAN_CONFIG");
+    }
+
+    #[test]
+    fn notifications_default_on_and_parse_off() {
+        assert!(Config::default().notifications_enabled());
+        let c = Config {
+            notifications: Some(false),
+            ..Default::default()
+        };
+        assert!(!c.notifications_enabled());
     }
 
     #[test]

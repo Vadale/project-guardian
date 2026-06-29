@@ -12,6 +12,7 @@
 #![forbid(unsafe_code)]
 
 pub mod config;
+mod notify;
 pub use config::{Config, ConfigError};
 
 use std::collections::HashMap;
@@ -48,6 +49,9 @@ pub struct ApprovalQueue {
     pending: Mutex<HashMap<u64, Entry>>,
     counter: AtomicU64,
     timeout: Duration,
+    /// Fire a best-effort desktop notification when an action is enqueued. Off by
+    /// default (libraries/tests stay quiet); the daemon opts in from config.
+    notifications: bool,
 }
 
 impl ApprovalQueue {
@@ -57,7 +61,15 @@ impl ApprovalQueue {
             pending: Mutex::new(HashMap::new()),
             counter: AtomicU64::new(0),
             timeout,
+            notifications: false,
         }
+    }
+
+    /// Enable best-effort desktop notifications on `ask` (convenience only; never
+    /// on the decision path, fails open). The daemon sets this from its config.
+    pub fn with_notifications(mut self, on: bool) -> Self {
+        self.notifications = on;
+        self
     }
 
     /// Enqueue an approval request and await the human's response. Returns
@@ -70,6 +82,10 @@ impl ApprovalQueue {
     ) -> ApprovalResponse {
         let id = self.counter.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
+        // Best-effort desktop alert (fire-and-forget) before we start waiting.
+        if self.notifications {
+            notify::approval_needed(&tool, &explanation.plain_text);
+        }
         {
             let mut pending = self.lock();
             pending.insert(
