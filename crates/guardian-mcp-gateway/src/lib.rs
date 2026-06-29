@@ -15,10 +15,14 @@
 
 #![forbid(unsafe_code)]
 
+/// Optional Presidio sidecar detector (ADR-0005) — behind the `presidio` feature.
+#[cfg(feature = "presidio")]
+pub mod presidio;
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use guardian_audit::{AuditEntry, AuditError, AuditLog};
@@ -71,6 +75,16 @@ pub trait Approver: Send + Sync {
 #[async_trait::async_trait]
 pub trait Upstream: Send + Sync {
     async fn forward(&self, call: &ToolCall) -> Result<Value, String>;
+}
+
+/// Port: an **optional** sensitive-data detector (ADR-0005). Given text, it returns the
+/// substrings that should be tokenized — e.g. names in free text found by a Presidio /
+/// LLM-Guard sidecar. It is **advisory**: a miss just falls back to the deterministic
+/// known-values + card detection, and the secret-exfiltration deny rule remains the
+/// backstop. The fuzzy NER is delegated here so the deterministic core stays small.
+#[async_trait::async_trait]
+pub trait PiiDetector: Send + Sync {
+    async fn detect(&self, text: &str) -> Vec<String>;
 }
 
 /// Routes a tool call to a decision + execution. Implemented in-process by
@@ -185,6 +199,8 @@ pub struct Gateway {
     /// Per-session data vaults (token↔value), so a token only resolves in the session
     /// that minted it.
     vaults: Mutex<HashMap<String, DataVault>>,
+    /// Optional sidecar detector for fuzzy PII in tool results (ADR-0005).
+    pii_detector: Option<Arc<dyn PiiDetector>>,
 }
 
 impl Gateway {
@@ -210,6 +226,7 @@ impl Gateway {
             counter: AtomicU64::new(0),
             data_protection: Vec::new(),
             vaults: Mutex::new(HashMap::new()),
+            pii_detector: None,
         }
     }
 
@@ -225,6 +242,19 @@ impl Gateway {
     pub fn with_data_protection(mut self, values: Vec<String>) -> Self {
         self.data_protection = values;
         self
+    }
+
+    /// Attach an optional PII detector sidecar (ADR-0005): detected spans are learned
+    /// into the session vault and tokenized along with the known values.
+    pub fn with_pii_detector(mut self, detector: Arc<dyn PiiDetector>) -> Self {
+        self.pii_detector = Some(detector);
+        self
+    }
+
+    /// Tokenization runs when there is anything to redact: configured known values
+    /// and/or a sidecar detector.
+    fn tokenization_on(&self) -> bool {
+        !self.data_protection.is_empty() || self.pii_detector.is_some()
     }
 
     /// The session vault, created (and seeded with the protected values) on first use.
@@ -302,7 +332,7 @@ impl Gateway {
             // into real values **only here**, at the authorized egress (the agent only
             // ever held opaque tokens); tokenize sensitive values in the result before
             // it reaches the agent. Per-session vault, so a token can't cross sessions.
-            if self.data_protection.is_empty() {
+            if !self.tokenization_on() {
                 return match self.upstream.forward(&call).await {
                     Ok(value) => GatewayOutcome::Allowed(value),
                     Err(err) => GatewayOutcome::UpstreamError(err),
@@ -316,6 +346,14 @@ impl Gateway {
             };
             match self.upstream.forward(&forwarded).await {
                 Ok(value) => {
+                    // Optional sidecar (ADR-0005): detect fuzzy PII in the result and
+                    // `learn` it so it is tokenized too. A miss just falls back to the
+                    // known-values + card detection — the sidecar is advisory.
+                    if let Some(det) = &self.pii_detector {
+                        for found in det.detect(&value.to_string()).await {
+                            self.with_vault(&session, |v| v.learn(&found));
+                        }
+                    }
                     let redacted = self.with_vault(&session, |v| v.tokenize_json(&value));
                     GatewayOutcome::Allowed(redacted)
                 }
@@ -1080,7 +1118,6 @@ const _: fn() = || {
 mod tests {
     use super::*;
     use serde_json::json;
-    use std::sync::Arc;
 
     const POLICY: &str = r#"
 version = 1
@@ -1253,6 +1290,48 @@ explain = "Sends an email on your behalf."
             Some("IT60X0542811101000000123456"),
             "egress was not detokenized"
         );
+    }
+
+    struct FakeDetector;
+    #[async_trait::async_trait]
+    impl PiiDetector for FakeDetector {
+        async fn detect(&self, _text: &str) -> Vec<String> {
+            vec!["Top Secret".to_string()]
+        }
+    }
+
+    #[tokio::test]
+    async fn sidecar_detected_value_is_tokenized_even_without_known_values() {
+        let policy = CompiledPolicy::from_toml_str(
+            "version=1\nrole=\"t\"\n[defaults]\ndecision=\"ask\"\n[[rules]]\nid=\"all\"\nwhen='true'\ndecision=\"allow\"\n",
+        )
+        .unwrap();
+        struct NoteUpstream;
+        #[async_trait::async_trait]
+        impl Upstream for NoteUpstream {
+            async fn forward(&self, _: &ToolCall) -> Result<Value, String> {
+                Ok(json!({ "note": "Top Secret stuff here" }))
+            }
+        }
+        let gw = Gateway::new(
+            "test",
+            policy,
+            Box::new(guardian_checker::StubChecker),
+            Box::new(AutoApprove),
+            Box::new(NoteUpstream),
+            AuditLog::open_in_memory().unwrap(),
+            EvalEnv::default(),
+        )
+        .with_pii_detector(Arc::new(FakeDetector));
+        let out = gw.handle(rd("read", json!({}), "s1")).await;
+        let GatewayOutcome::Allowed(v) = out else {
+            panic!()
+        };
+        assert!(
+            !v.to_string().contains("Top Secret"),
+            "sidecar-detected PII leaked: {v}"
+        );
+        assert!(v["note"].as_str().unwrap().contains("[[GDN-"));
     }
 
     #[tokio::test]

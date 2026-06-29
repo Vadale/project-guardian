@@ -1249,9 +1249,11 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "guardian-audit",
+ "guardian-broker",
  "guardian-checker",
  "guardian-core",
  "guardian-policy",
+ "reqwest",
  "serde",
  "serde_json",
  "tokio",

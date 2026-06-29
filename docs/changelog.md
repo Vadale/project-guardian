@@ -7,6 +7,18 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 
 ## [Unreleased]
 
+### Added — 2026-06-29 (ADR-0005 implementation, part 3 — optional Presidio sidecar)
+- **`PiiDetector` port + optional Presidio sidecar** for fuzzy PII detection (ADR-0005).
+  The gateway gains `Gateway::with_pii_detector(Arc<dyn PiiDetector>)`: detected spans
+  are `learn`ed into the session vault and tokenized alongside the known values. It is
+  **advisory** — a sidecar miss/outage just falls back to known-values + the Luhn card
+  detector, and the secret-exfiltration deny rule remains the backstop. The fuzzy NER
+  stays out of the deterministic core. `HttpPiiDetector` (calls Presidio's `/analyze`) is
+  behind the **off-by-default `presidio` feature** (optional `reqwest`), so the default
+  build/CI pulls no HTTP client. Test with a fake detector: a sidecar-detected value is
+  tokenized even with no configured known values. 192 tests; default + `--features
+  presidio` build, clippy, deny all green.
+
 ### Added — 2026-06-29 (ADR-0005 implementation, part 2 — tokenization wired into the gateway)
 - **The MCP gateway now applies the data vault on the live path** (opt-in via
   `Gateway::with_data_protection(values)`): a tool **result** is tokenized before it
