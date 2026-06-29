@@ -36,6 +36,11 @@ impl DataVault {
         Self::default()
     }
 
+    /// How many distinct values have been tokenized so far (for status display).
+    pub fn token_count(&self) -> usize {
+        self.by_id.len()
+    }
+
     /// Register a sensitive value to tokenize whenever it appears (idempotent).
     pub fn learn(&mut self, value: &str) {
         let v = value.trim();

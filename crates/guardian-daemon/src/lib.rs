@@ -272,10 +272,20 @@ mod server {
             #[serde(default = "default_history_limit")]
             limit: usize,
         },
+        /// Add a sensitive value to tokenize before the agent sees it (data vault, ADR-0005).
+        Protect { value: String },
+        /// Report data-vault status: how many values are protected and tokens issued.
+        VaultStatus,
     }
 
     fn default_history_limit() -> usize {
         50
+    }
+
+    /// Parse `(protected, tokens)` from a `Vault` response object.
+    fn vault_pair(v: &serde_json::Value) -> (usize, usize) {
+        let n = |k: &str| v.get(k).and_then(serde_json::Value::as_u64).unwrap_or(0) as usize;
+        (n("protected"), n("tokens"))
     }
 
     /// One row of the activity archive, for the cockpit's history view.
@@ -319,6 +329,10 @@ mod server {
         },
         History {
             items: Vec<HistoryView>,
+        },
+        Vault {
+            protected: usize,
+            tokens: usize,
         },
         Error {
             message: String,
@@ -513,6 +527,15 @@ mod server {
                     .collect();
                 Response::History { items }
             }
+            Request::Protect { value } => {
+                gateway.add_protected(value);
+                let (protected, tokens) = gateway.vault_stats();
+                Response::Vault { protected, tokens }
+            }
+            Request::VaultStatus => {
+                let (protected, tokens) = gateway.vault_stats();
+                Response::Vault { protected, tokens }
+            }
         }
     }
 
@@ -563,6 +586,20 @@ mod server {
                 .get("ok")
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false))
+        }
+
+        /// Add a sensitive value to the data vault (tokenized before the agent sees it).
+        /// Returns the resulting `(values protected, tokens issued)`.
+        pub async fn protect(&self, value: &str) -> std::io::Result<(usize, usize)> {
+            let request = serde_json::json!({ "cmd": "protect", "value": value }).to_string();
+            let v = self.rpc(&request).await?;
+            Ok(vault_pair(&v))
+        }
+
+        /// Data-vault status: `(values protected, tokens issued)`.
+        pub async fn vault_status(&self) -> std::io::Result<(usize, usize)> {
+            let v = self.rpc(r#"{"cmd":"vault_status"}"#).await?;
+            Ok(vault_pair(&v))
         }
 
         /// Enqueue an approval request and block until the cockpit resolves it
@@ -872,6 +909,15 @@ decision = "ask"
             .await;
             let resp = rpc(&path, r#"{"cmd":"verify_audit"}"#).await;
             assert!(resp.contains(r#""intact":true"#), "got {resp}");
+        }
+
+        #[tokio::test]
+        async fn protect_and_vault_status_over_socket() {
+            let path = start().await;
+            let added = rpc(&path, r#"{"cmd":"protect","value":"Mario Rossi"}"#).await;
+            assert!(added.contains(r#""protected":1"#), "got {added}");
+            let status = rpc(&path, r#"{"cmd":"vault_status"}"#).await;
+            assert!(status.contains(r#""protected":1"#), "got {status}");
         }
 
         #[tokio::test]

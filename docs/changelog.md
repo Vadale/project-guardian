@@ -7,6 +7,17 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 
 ## [Unreleased]
 
+### Added — 2026-06-29 (cockpit: manage data protection / tokenization)
+- **The TUI cockpit can now drive the data vault.** New **Protect** view (`v`): type a
+  sensitive value (name, IBAN, account…) → it is added to Guardian's protection so it is
+  tokenized in tool results before the agent sees it; a status line shows
+  `N value(s) protected · M token(s) issued`. Backed by new daemon protocol messages
+  `protect { value }` and `vault_status` (+ `DaemonClient::protect` / `vault_status`),
+  and runtime-mutable protection in the gateway (`Gateway::add_protected` learns the
+  value into every open session vault; `vault_stats`; `DataVault::token_count`). Tests:
+  runtime-add reaches an open session, protect/vault_status over the socket, and a
+  Protect-view render test. 195 tests; fmt/clippy/deny green.
+
 ### Added — 2026-06-29 (ADR-0005 implementation, part 3 — optional Presidio sidecar)
 - **`PiiDetector` port + optional Presidio sidecar** for fuzzy PII detection (ADR-0005).
   The gateway gains `Gateway::with_pii_detector(Arc<dyn PiiDetector>)`: detected spans
