@@ -36,6 +36,22 @@
 
 ---
 
+> ## ⚠️ Disclaimer — use at your own risk
+>
+> Guardian is **early-stage software (v0.1.0)** that can be configured to handle
+> **sensitive data** (credentials, personal data, financial details). It is provided
+> **"AS IS", without warranty of any kind**, under the [Apache-2.0](LICENSE) license
+> (see Sections 7–8). To the maximum extent permitted by law, **the author accepts no
+> liability** for any damage, data loss, security breach, financial loss, or other
+> harm arising from the use, misuse, or inability to use this software. **You are
+> solely responsible** for evaluating its fitness for your purpose, for how you
+> configure your policy, and for the security of any data you route through it. It is
+> **not** certified, audited, or production-hardened, and must not be relied upon as
+> the sole safeguard for high-stakes or regulated workloads. See [SECURITY.md](SECURITY.md)
+> for the threat model and how to report a vulnerability.
+
+---
+
 ## 1. What it is (one paragraph)
 
 **Guardian** is a local, user-space "firewall" that sits between an autonomous
