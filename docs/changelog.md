@@ -7,6 +7,16 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 
 ## [Unreleased]
 
+### Improved — 2026-06-29 (data-protection UX: seed from config, masked list, remove)
+- **No more retyping:** the daemon seeds the data vault from `protect = [..]` in
+  `~/.guardian/config.toml` at startup (new `Config.protect`; documented in the default
+  config template). 
+- **The cockpit Protect view now shows the *masked* list** of protected values
+  (e.g. `Ma*******si`, never the raw value) plus the count, and **Backspace on an empty
+  field removes the last** one (undo). New daemon `unprotect` message + `Vault` response
+  carries masked `values`; gateway `protected_masked()` / `remove_last_protected()`.
+  196 tests; fmt/clippy/deny green.
+
 ### Added — 2026-06-29 (cockpit: manage data protection / tokenization)
 - **The TUI cockpit can now drive the data vault.** New **Protect** view (`v`): type a
   sensitive value (name, IBAN, account…) → it is added to Guardian's protection so it is

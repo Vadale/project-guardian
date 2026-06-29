@@ -39,6 +39,10 @@ pub struct Config {
     /// Hosts treated as trusted by the policy. Default: none.
     #[serde(default)]
     pub trusted_hosts: Vec<String>,
+    /// Sensitive values to tokenize before the agent sees them (data vault, ADR-0005).
+    /// Seeded into the gateway at startup so they need not be re-typed in the cockpit.
+    #[serde(default)]
+    pub protect: Vec<String>,
 }
 
 #[derive(Debug, Error)]
@@ -87,6 +91,7 @@ const DEFAULT_CONFIG_TEMPLATE: &str = r#"# Project Guardian — daemon config.
 # checker_endpoint = "http://localhost:11434/explain"   # advisory only; omitted -> offline.
 #   The full action (incl. args) is POSTed there — use a trusted, local endpoint.
 # trusted_hosts = ["api.example.com"]
+# protect = ["Mario Rossi", "IT60X0542811101000000123456"]   # values tokenized before the agent sees them (data vault)
 "#;
 
 impl Config {
