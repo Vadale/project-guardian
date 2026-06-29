@@ -1,6 +1,10 @@
 # Project Guardian — An AI Guardian Firewall for Autonomous Agents
 
-> **Status:** working product, **v0.1.0 released**. Rust workspace, 176 tests green.
+<p align="center">
+  <img src="scripts/demo/assets/guardian-demo.gif" alt="Guardian mediating an agent's actions: a deterministic traffic light (allow / ask / deny) and a data vault that tokenizes your data so the agent never sees it." width="820">
+</p>
+
+> **Status:** working product, **v0.1.0 released**. Rust workspace, 196 tests green.
 > Implemented through **Phase 4 (hardening)**: the deterministic policy engine, the
 > tamper-evident audit log (optionally **sealed-key signed**), the advisory Checker,
 > the MCP gateway + stdio transport, the daemon + control socket, the terminal

@@ -1,0 +1,3 @@
+# Demo daemon config: seed the data vault from disk so the cockpit / agent never
+# has to retype the values that must always be protected before the agent sees them.
+protect = ["Mario Rossi", "IT60X0542811101000000123456"]

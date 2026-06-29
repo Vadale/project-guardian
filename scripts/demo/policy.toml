@@ -1,0 +1,48 @@
+# Demo policy for the README hero recording (scripts/demo/play.sh).
+# Mirrors the shipped coding-agent pack: reads are silent, the local report write
+# is an authorized egress, destructive shell and exfiltration paths are denied,
+# money movement stays a critical human-gated action.
+version = 1
+role = "demo"
+
+[meta]
+description = "Demo policy: green reads, a yellow critical money ask, red destructive shell + exfiltration."
+
+[defaults]
+decision = "ask"
+
+[[rules]]
+id = "read-files"
+when = 'action.kind == "FileRead"'
+decision = "allow"
+
+# A write to an untrusted/exfiltration path is blocked outright (and is the
+# boundary where the data vault would NOT detokenize).
+[[rules]]
+id = "deny-exfiltration"
+when = 'action.kind == "FileWrite" && action.context.path.contains("exfil")'
+decision = "deny"
+critical = true
+explain = "Tried to send your data to an untrusted destination."
+
+# The local report write is the authorized egress.
+[[rules]]
+id = "write-report"
+when = 'action.kind == "FileWrite"'
+decision = "allow"
+explain = "Writes the local report (authorized egress)."
+
+[[rules]]
+id = "destructive-shell"
+when = 'action.kind == "Exec" && action.args.cmd.matches("rm\\s+(-[a-zA-Z]+\\s+)*(/|~|\\$HOME)(\\s|$|\\*)")'
+decision = "deny"
+critical = true
+explain = "Looks like a filesystem-wiping command."
+
+# Money movement is always critical — never auto-downgraded (invariant #4).
+[[rules]]
+id = "money-movement"
+when = 'action.capability == "Payment"'
+decision = "ask"
+critical = true
+explain = "Sends money — needs your explicit approval."

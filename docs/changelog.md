@@ -7,6 +7,16 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 
 ## [Unreleased]
 
+### Added — 2026-06-29 (README hero demo)
+- A narrated terminal demo recorded with [VHS](https://github.com/charmbracelet/vhs),
+  embedded at the top of the README: the deterministic traffic light (allow / ask / deny,
+  with a critical money-ask) and the data-vault round-trip (the agent receives only
+  `[[GDN-…]]` tokens; the real values are restored at an authorized egress and a write to an
+  exfil path is denied). Every verdict is a real `guardian decide` call and the vault scene
+  runs against a live daemon — nothing is faked. Source under `scripts/demo/`
+  (`play.sh`, `guardian-demo.tape`, `fmt_badge.py`, `gcall.py`); regenerate with
+  `vhs scripts/demo/guardian-demo.tape`.
+
 ### Improved — 2026-06-29 (data-protection UX: seed from config, masked list, remove)
 - **No more retyping:** the daemon seeds the data vault from `protect = [..]` in
   `~/.guardian/config.toml` at startup (new `Config.protect`; documented in the default
