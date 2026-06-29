@@ -7,6 +7,18 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 
 ## [Unreleased]
 
+### Decided — 2026-06-29 (ADR-0005: privacy data-handling)
+- **ADR-0005**: for PII tokenization (a generalized "data broker") and an output-guard /
+  DLP, **integrate** off-the-shelf MIT engines (LLM Guard `Anonymize`/`Deanonymize` +
+  Vault, Microsoft Presidio; optional Databunker / Open Privacy Vault) as a **sidecar**
+  at Guardian's inbound (sanitize-tool-results) and outbound hooks — **do not reinvent
+  NER/anonymization**. Guardian owns the deterministic policy (when to tokenize),
+  trusted vault/key custody (broker generalized), agent-agnostic interception, and the
+  audit; the libraries do detection/anonymization. Scoping rule: tokenize *carried*
+  identifiers, not content the agent must reason over. Context-window minimization stays
+  the agent/harness's job. Motivated by the output-leak residual surfaced in the eval
+  (broker protects literal secrets; the agent's *derived* context is the residual).
+
 ### Added — 2026-06-29 (GuardianBench + red-team bank + Inspect integration)
 - **`evaluation/guardianbench/`** — GuardianBench v0.1: a deterministic, model-free,
   agent-agnostic benchmark built *for an action-firewall*. It scores the **disposition
