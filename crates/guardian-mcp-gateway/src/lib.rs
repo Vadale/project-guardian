@@ -15,12 +15,14 @@
 
 #![forbid(unsafe_code)]
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use guardian_audit::{AuditEntry, AuditError, AuditLog};
+use guardian_broker::DataVault;
 use guardian_checker::{Checker, Explanation};
 use guardian_core::{Action, ActionContext, ActionId, ActionKind, Capability, Decision};
 use guardian_policy::{CompiledPolicy, EvalEnv};
@@ -40,6 +42,11 @@ pub struct ToolCall {
     pub kind: Option<ActionKind>,
     #[serde(default)]
     pub capability: Option<Capability>,
+    /// Session this call belongs to. Scopes the data vault so a tokenized value can
+    /// only be detokenized within the session that produced it (never replayed across
+    /// sessions). Absent → the shared `"default"` session (single-agent / CLI use).
+    #[serde(default)]
+    pub session: Option<String>,
 }
 
 /// The human's resolution of an `ask` action.
@@ -171,6 +178,13 @@ pub struct Gateway {
     env: EvalEnv,
     self_protection: SelfProtection,
     counter: AtomicU64,
+    /// Sensitive values to tokenize in tool results before the agent sees them
+    /// (empty = tokenization off, zero overhead). The agent works with opaque tokens
+    /// and Guardian restores them only into an authorized outbound call (ADR-0005).
+    data_protection: Vec<String>,
+    /// Per-session data vaults (token↔value), so a token only resolves in the session
+    /// that minted it.
+    vaults: Mutex<HashMap<String, DataVault>>,
 }
 
 impl Gateway {
@@ -194,6 +208,8 @@ impl Gateway {
             env,
             self_protection: SelfProtection::default(),
             counter: AtomicU64::new(0),
+            data_protection: Vec::new(),
+            vaults: Mutex::new(HashMap::new()),
         }
     }
 
@@ -201,6 +217,27 @@ impl Gateway {
     pub fn with_self_protection(mut self, self_protection: SelfProtection) -> Self {
         self.self_protection = self_protection;
         self
+    }
+
+    /// Protect these sensitive values: they are replaced with opaque tokens in tool
+    /// results before the agent sees them, and restored only into an authorized
+    /// outbound call (ADR-0005). Empty (default) leaves tokenization off.
+    pub fn with_data_protection(mut self, values: Vec<String>) -> Self {
+        self.data_protection = values;
+        self
+    }
+
+    /// The session vault, created (and seeded with the protected values) on first use.
+    fn with_vault<T>(&self, session: &str, f: impl FnOnce(&mut DataVault) -> T) -> T {
+        let mut vaults = self.vaults.lock().expect("vault mutex poisoned");
+        let vault = vaults.entry(session.to_string()).or_insert_with(|| {
+            let mut v = DataVault::new();
+            for s in &self.data_protection {
+                v.learn(s);
+            }
+            v
+        });
+        f(vault)
     }
 
     /// Mediate one tool call: normalize → evaluate → (for `ask` only) explain +
@@ -261,8 +298,27 @@ impl Gateway {
         }
 
         if proceed {
-            match self.upstream.forward(&call).await {
-                Ok(value) => GatewayOutcome::Allowed(value),
+            // Tokenization (ADR-0005), only when enabled. Detokenize the agent's args
+            // into real values **only here**, at the authorized egress (the agent only
+            // ever held opaque tokens); tokenize sensitive values in the result before
+            // it reaches the agent. Per-session vault, so a token can't cross sessions.
+            if self.data_protection.is_empty() {
+                return match self.upstream.forward(&call).await {
+                    Ok(value) => GatewayOutcome::Allowed(value),
+                    Err(err) => GatewayOutcome::UpstreamError(err),
+                };
+            }
+            let session = call.session.clone().unwrap_or_default();
+            let real_args = self.with_vault(&session, |v| v.detokenize_json(&call.args));
+            let forwarded = ToolCall {
+                args: real_args,
+                ..call
+            };
+            match self.upstream.forward(&forwarded).await {
+                Ok(value) => {
+                    let redacted = self.with_vault(&session, |v| v.tokenize_json(&value));
+                    GatewayOutcome::Allowed(redacted)
+                }
                 Err(err) => GatewayOutcome::UpstreamError(err),
             }
         } else {
@@ -534,6 +590,7 @@ pub mod mcp {
                 args,
                 kind: Some(kind),
                 capability: None,
+                session: None,
             };
             match self.router.route(call).await {
                 GatewayOutcome::Allowed(value) => Ok(json!({
@@ -964,6 +1021,7 @@ pub mod upstream {
                     args: call.args.clone(),
                     kind: None,
                     capability: None,
+                    session: None,
                 })
                 .await
         }
@@ -1021,6 +1079,7 @@ const _: fn() = || {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use std::sync::Arc;
 
     const POLICY: &str = r#"
@@ -1108,6 +1167,7 @@ explain = "Sends an email on your behalf."
             args: serde_json::json!({}),
             kind: Some(kind),
             capability: None,
+            session: None,
         }
     }
 
@@ -1118,6 +1178,100 @@ explain = "Sends an email on your behalf."
         let out = gw.handle(call("fs.read", ActionKind::FileRead)).await;
         assert!(matches!(out, GatewayOutcome::Allowed(_)));
         assert_eq!(*forwarded.lock().unwrap(), vec!["fs.read".to_string()]);
+    }
+
+    // --- Data-vault tokenization wired into the gateway (ADR-0005) ---------------
+
+    /// Returns the user's IBAN on "read"; on any other tool records the args it was
+    /// actually given (so a test can assert detokenization happened at egress).
+    struct PiiUpstream {
+        last_args: Arc<Mutex<Value>>,
+    }
+    #[async_trait::async_trait]
+    impl Upstream for PiiUpstream {
+        async fn forward(&self, call: &ToolCall) -> Result<Value, String> {
+            *self.last_args.lock().unwrap() = call.args.clone();
+            if call.tool == "read" {
+                Ok(json!({ "iban": "IT60X0542811101000000123456" }))
+            } else {
+                Ok(json!({ "ok": true }))
+            }
+        }
+    }
+
+    fn protected_gateway() -> (Gateway, Arc<Mutex<Value>>) {
+        let last = Arc::new(Mutex::new(Value::Null));
+        let policy = CompiledPolicy::from_toml_str(
+            "version=1\nrole=\"t\"\n[defaults]\ndecision=\"ask\"\n[[rules]]\nid=\"all\"\nwhen='true'\ndecision=\"allow\"\n",
+        )
+        .unwrap();
+        let gw = Gateway::new(
+            "test",
+            policy,
+            Box::new(guardian_checker::StubChecker),
+            Box::new(AutoApprove),
+            Box::new(PiiUpstream {
+                last_args: last.clone(),
+            }),
+            AuditLog::open_in_memory().unwrap(),
+            EvalEnv::default(),
+        )
+        .with_data_protection(vec!["IT60X0542811101000000123456".to_string()]);
+        (gw, last)
+    }
+
+    fn rd(tool: &str, args: Value, session: &str) -> ToolCall {
+        ToolCall {
+            tool: tool.to_string(),
+            args,
+            kind: Some(ActionKind::FileRead),
+            capability: None,
+            session: Some(session.to_string()),
+        }
+    }
+
+    #[tokio::test]
+    async fn result_is_tokenized_to_the_agent_and_detokenized_at_egress() {
+        let (gw, last) = protected_gateway();
+        // 1) A tool result carrying the IBAN comes back tokenized — the agent never sees it.
+        let out = gw.handle(rd("read", json!({}), "s1")).await;
+        let GatewayOutcome::Allowed(v) = out else {
+            panic!("expected allow")
+        };
+        let tok = v["iban"].as_str().unwrap().to_string();
+        assert!(tok.starts_with("[[GDN-"), "result not tokenized: {v}");
+        assert!(
+            !v.to_string().contains("IT60X0542811101000000123456"),
+            "IBAN leaked to agent"
+        );
+
+        // 2) The agent passes that token back in a new (authorized) call; Guardian
+        //    detokenizes it into the real IBAN only at the egress to the upstream.
+        let _ = gw.handle(rd("send", json!({ "to": tok }), "s1")).await;
+        assert_eq!(
+            last.lock().unwrap()["to"].as_str(),
+            Some("IT60X0542811101000000123456"),
+            "egress was not detokenized"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_token_does_not_resolve_in_another_session() {
+        let (gw, last) = protected_gateway();
+        let out = gw.handle(rd("read", json!({}), "alice")).await;
+        let GatewayOutcome::Allowed(v) = out else {
+            panic!()
+        };
+        let tok = v["iban"].as_str().unwrap().to_string();
+        // Replaying alice's token in bob's session must NOT resolve to the real value.
+        let _ = gw
+            .handle(rd("send", json!({ "to": tok.clone() }), "bob"))
+            .await;
+        assert_eq!(
+            last.lock().unwrap()["to"].as_str(),
+            Some(tok.as_str()),
+            "cross-session replay leaked the value"
+        );
     }
 
     #[tokio::test]
@@ -1248,6 +1402,7 @@ explain = "Sends an email on your behalf."
             args: serde_json::json!({ "path": "/grd/policy.toml" }),
             kind: Some(ActionKind::FileWrite),
             capability: None,
+            session: None,
         };
         assert!(matches!(gw.handle(write).await, GatewayOutcome::Blocked(_)));
         assert!(forwarded.lock().unwrap().is_empty());
@@ -1290,6 +1445,7 @@ explain = "Sends an email on your behalf."
             args: serde_json::json!({ "path": p }),
             kind: Some(ActionKind::FileWrite),
             capability: None,
+            session: None,
         };
         // `..` that resolves INTO the protected dir is blocked (lexical-match bypass).
         assert!(matches!(
@@ -1311,6 +1467,7 @@ explain = "Sends an email on your behalf."
             args: serde_json::json!({ "path": "/grd/policy.toml" }),
             kind: Some(ActionKind::FileRead),
             capability: None,
+            session: None,
         };
         assert!(matches!(gw.handle(read).await, GatewayOutcome::Allowed(_)));
     }
