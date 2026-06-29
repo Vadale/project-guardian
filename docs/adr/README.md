@@ -15,4 +15,4 @@ Alternatives considered.
 | [0002](0002-act-at-harness-boundary.md) | Act at the harness/tool boundary, not the OS kernel | Accepted |
 | [0003](0003-deterministic-enforcement.md) | Deterministic enforcement; the LLM Checker is advisory only | Accepted |
 | [0004](0004-network-proxy.md) | Network interception via an HTTP(S) MITM forward proxy | Accepted |
-| [0005](0005-privacy-data-handling.md) | Privacy data-handling: integrate PII tokenization + output-DLP; Guardian owns policy/vault/audit | Proposed |
+| [0005](0005-privacy-data-handling.md) | Privacy data-handling: own vault + structured tokenization in Rust; sidecar fuzzy NER / output-DLP | Proposed |

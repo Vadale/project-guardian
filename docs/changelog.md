@@ -8,16 +8,18 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 ## [Unreleased]
 
 ### Decided — 2026-06-29 (ADR-0005: privacy data-handling)
-- **ADR-0005**: for PII tokenization (a generalized "data broker") and an output-guard /
-  DLP, **integrate** off-the-shelf MIT engines (LLM Guard `Anonymize`/`Deanonymize` +
-  Vault, Microsoft Presidio; optional Databunker / Open Privacy Vault) as a **sidecar**
-  at Guardian's inbound (sanitize-tool-results) and outbound hooks — **do not reinvent
-  NER/anonymization**. Guardian owns the deterministic policy (when to tokenize),
-  trusted vault/key custody (broker generalized), agent-agnostic interception, and the
-  audit; the libraries do detection/anonymization. Scoping rule: tokenize *carried*
-  identifiers, not content the agent must reason over. Context-window minimization stays
-  the agent/harness's job. Motivated by the output-leak residual surfaced in the eval
-  (broker protects literal secrets; the agent's *derived* context is the residual).
+- **ADR-0005**: split by criticality. **Own** the *vault + structured-PII tokenization*
+  (IBAN/card/phone/email/account — regex-detectable, the broker generalized) in **native
+  Rust** inside Guardian — no Python in the deterministic core. **Delegate** the hard
+  *fuzzy NER on free text + output-DLP* to an MIT **sidecar** (Microsoft Presidio and/or
+  LLM Guard `Anonymize`/`Deanonymize`+Vault; optional Databunker / Open Privacy Vault),
+  advisory (a miss fails safe to the secret-exfiltration deny-rule backstop). **Do not
+  embed a Python ML stack in the core; do not fork** (extend via their plugin APIs).
+  Guardian owns the policy (when to tokenize), vault/key custody, agent-agnostic
+  interception, and the audit. Scoping rule: tokenize *carried* identifiers, not content
+  the agent must reason over. Context-window minimization stays the agent's job.
+  Motivated by the output-leak residual surfaced in the eval (broker protects literal
+  secrets; the agent's *derived* context is the residual).
 
 ### Added — 2026-06-29 (GuardianBench + red-team bank + Inspect integration)
 - **`evaluation/guardianbench/`** — GuardianBench v0.1: a deterministic, model-free,
