@@ -1,0 +1,6 @@
+# Inspect approval policy: route EVERY tool call through Guardian's approver.
+# Used with:  inspect eval ... --approval guardian_approval.yaml
+# The "*" glob prefix-matches all tool names, so every tool call is mediated.
+approvers:
+  - name: guardian
+    tools: "*"

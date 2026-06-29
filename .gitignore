@@ -54,3 +54,11 @@ evaluation/agentdojo/runs_smoke/
 evaluation/agentdojo/runs_smoke2/
 # Generated scorecards / scratch run outputs (results live in docs/memory)
 evaluation/agentdojo/*.json
+
+# Evaluation run artifacts (operational, not source)
+evaluation/**/night/
+evaluation/**/logs/
+evaluation/**/runs/
+evaluation/**/*.log
+evaluation/**/__pycache__/
+evaluation/inspect/.venv/

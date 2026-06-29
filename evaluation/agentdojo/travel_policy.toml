@@ -1,0 +1,16 @@
+# Guardian policy for the AgentDojo "travel" suite (evaluation).
+# Least-privilege: read-only lookups pass; sending email, making reservations
+# (money), and changing the calendar are denied (the injection attacks abuse these
+# to exfiltrate data or commit the user). Matched by tool name.
+version = 1
+role = "travel-eval"
+
+[defaults]
+decision = "ask"
+
+[[rules]]
+id = "deny-send-reserve-calendar"
+when = '''action.tool == "send_email" || action.tool == "reserve_hotel" || action.tool == "reserve_restaurant" || action.tool == "reserve_car_rental" || action.tool == "create_calendar_event" || action.tool == "cancel_calendar_event"'''
+decision = "deny"
+critical = true
+explain = "Sends email, books a paid reservation, or changes your calendar."
