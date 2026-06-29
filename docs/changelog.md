@@ -7,6 +7,15 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 
 ## [Unreleased]
 
+### Added — 2026-06-29 (white paper)
+- A design & threat-model **white paper** (`docs/whitepaper.md` + `docs/whitepaper.pdf`,
+  ~8 pages), repackaging the spec, threat model, invariants, architecture, data-protection
+  model, and evaluation into a citable document. Includes four diagrams (decision pipeline,
+  the data-vault round-trip, the GuardianBench scorecard, and the 100%→0% attack-success
+  chart) as standalone SVGs under `docs/whitepaper/` so the markdown renders with figures on
+  GitHub and the PDF carries them baked in. Linked from the README. Source/markdown authored
+  with inline SVG; the PDF is generated via pandoc + headless Chrome.
+
 ### Added — 2026-06-29 (onboarding: `guardian init`, MCP snippet, desktop notifications)
 - **`guardian init`** — one-command setup. Creates `~/.guardian/{config.toml,policy.toml}`
   (owner-only) for `--role coding-agent` (default) or `personal-assistant`, wires the

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 720 250" xmlns="http://www.w3.org/2000/svg" font-family="Helvetica Neue, Arial, sans-serif">
+  <defs>
+    <marker id="va" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#5b6b63"/></marker>
+  </defs>
+  <!-- Panel A: on disk -->
+  <text x="118" y="28" text-anchor="middle" font-size="11" font-weight="bold" fill="#163b2a">On disk — the real data</text>
+  <rect x="14" y="40" width="208" height="150" rx="8" fill="#f4f6f5" stroke="#b9c6bf"/>
+  <text x="30" y="84" font-size="11" font-family="Menlo, Consolas, monospace" fill="#222">Customer: <tspan fill="#0e7a3a" font-weight="bold">Mario Rossi</tspan></text>
+  <text x="30" y="112" font-size="11" font-family="Menlo, Consolas, monospace" fill="#222">IBAN: <tspan fill="#0e7a3a" font-weight="bold">IT60…0123456</tspan></text>
+  <text x="30" y="140" font-size="11" font-family="Menlo, Consolas, monospace" fill="#222">Status: VIP</text>
+  <!-- arrow A->B -->
+  <line x1="224" y1="115" x2="258" y2="115" stroke="#5b6b63" stroke-width="1.6" marker-end="url(#va)"/>
+  <!-- Panel B: agent view -->
+  <text x="360" y="28" text-anchor="middle" font-size="11" font-weight="bold" fill="#163b2a">What the agent receives</text>
+  <rect x="256" y="40" width="208" height="150" rx="8" fill="#faf3fb" stroke="#d9a9e0"/>
+  <text x="272" y="84" font-size="11" font-family="Menlo, Consolas, monospace" fill="#222">Customer: <tspan fill="#a31fb0" font-weight="bold">[[GDN-a17f…]]</tspan></text>
+  <text x="272" y="112" font-size="11" font-family="Menlo, Consolas, monospace" fill="#222">IBAN: <tspan fill="#a31fb0" font-weight="bold">[[GDN-9c4e…]]</tspan></text>
+  <text x="360" y="160" text-anchor="middle" font-size="9.5" fill="#7a4a80" font-style="italic">no real PII ever reaches the agent</text>
+  <!-- arrow B->C -->
+  <line x1="466" y1="115" x2="500" y2="115" stroke="#5b6b63" stroke-width="1.6" marker-end="url(#va)"/>
+  <!-- Panel C: egress outcomes -->
+  <text x="602" y="28" text-anchor="middle" font-size="11" font-weight="bold" fill="#163b2a">At the boundary</text>
+  <rect x="498" y="40" width="208" height="70" rx="8" fill="#e7faef" stroke="#2ee66b"/>
+  <text x="602" y="64" text-anchor="middle" font-size="11" font-weight="bold" fill="#0e7a3a">● Authorized egress</text>
+  <text x="602" y="84" text-anchor="middle" font-size="10" fill="#1a5e34">real value restored just</text>
+  <text x="602" y="98" text-anchor="middle" font-size="10" fill="#1a5e34">here, then forwarded</text>
+  <rect x="498" y="120" width="208" height="70" rx="8" fill="#fdecec" stroke="#ff6b6b"/>
+  <text x="602" y="144" text-anchor="middle" font-size="11" font-weight="bold" fill="#c22">● Exfil path → DENY</text>
+  <text x="602" y="164" text-anchor="middle" font-size="10" fill="#902">blocked before detokenize;</text>
+  <text x="602" y="178" text-anchor="middle" font-size="10" fill="#902">the token is useless</text>
+</svg>

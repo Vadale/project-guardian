@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 720 480" xmlns="http://www.w3.org/2000/svg" font-family="Helvetica Neue, Arial, sans-serif">
+  <defs>
+    <marker id="a" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#5b6b63"/></marker>
+    <marker id="ag" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#1faa55"/></marker>
+    <marker id="ay" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#c79a1e"/></marker>
+    <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#e23b3b"/></marker>
+  </defs>
+  <!-- agent -->
+  <rect x="250" y="14" width="220" height="52" rx="8" fill="#fbecec" stroke="#d98a8a"/>
+  <text x="360" y="36" text-anchor="middle" font-size="14" font-weight="bold" fill="#7a2222">AI agent — untrusted</text>
+  <text x="360" y="54" text-anchor="middle" font-size="10.5" fill="#9a4a4a">Claude · GPT · Llama · local model + harness</text>
+  <line x1="360" y1="66" x2="360" y2="98" stroke="#5b6b63" stroke-width="1.6" marker-end="url(#a)"/>
+  <text x="372" y="86" font-size="10" fill="#5b6b63">structured action (tool, args, capability)</text>
+  <!-- interception -->
+  <rect x="250" y="100" width="220" height="50" rx="8" fill="#eef3f0" stroke="#7fae95"/>
+  <text x="360" y="121" text-anchor="middle" font-size="13" font-weight="bold" fill="#163b2a">Interception</text>
+  <text x="360" y="138" text-anchor="middle" font-size="10.5" fill="#3a5a4b">MCP gateway · Claude Code hook · network proxy</text>
+  <line x1="360" y1="150" x2="360" y2="180" stroke="#5b6b63" stroke-width="1.6" marker-end="url(#a)"/>
+  <!-- policy engine -->
+  <rect x="226" y="182" width="268" height="64" rx="9" fill="#eaf5ee" stroke="#2a6f4e" stroke-width="2.2"/>
+  <text x="360" y="205" text-anchor="middle" font-size="14" font-weight="bold" fill="#0b2e1f">Deterministic policy engine (CEL)</text>
+  <text x="360" y="222" text-anchor="middle" font-size="10.5" fill="#2a6f4e">most-restrictive-wins: deny &gt; ask &gt; allow</text>
+  <text x="360" y="238" text-anchor="middle" font-size="10.5" fill="#2a6f4e">+ intrinsic critical-category floor · no LLM here</text>
+  <!-- fan-out connectors -->
+  <path d="M300,246 C220,270 140,278 120,300" fill="none" stroke="#1faa55" stroke-width="1.8" marker-end="url(#ag)"/>
+  <line x1="360" y1="246" x2="360" y2="300" stroke="#c79a1e" stroke-width="1.8" marker-end="url(#ay)"/>
+  <path d="M420,246 C500,270 580,278 600,300" fill="none" stroke="#e23b3b" stroke-width="1.8" marker-end="url(#ar)"/>
+  <!-- outcomes -->
+  <rect x="20" y="302" width="200" height="70" rx="8" fill="#e7faef" stroke="#2ee66b"/>
+  <text x="120" y="324" text-anchor="middle" font-size="13" font-weight="bold" fill="#0e7a3a">● ALLOW</text>
+  <text x="120" y="343" text-anchor="middle" font-size="10.5" fill="#1a5e34">forwarded to the real</text>
+  <text x="120" y="358" text-anchor="middle" font-size="10.5" fill="#1a5e34">tool / service</text>
+  <rect x="260" y="302" width="200" height="70" rx="8" fill="#fdf6e3" stroke="#e0b93c"/>
+  <text x="360" y="324" text-anchor="middle" font-size="13" font-weight="bold" fill="#9a7a14">● ASK</text>
+  <text x="360" y="343" text-anchor="middle" font-size="10.5" fill="#6e5810">Checker explains →</text>
+  <text x="360" y="358" text-anchor="middle" font-size="10.5" fill="#6e5810">human approves / denies</text>
+  <rect x="500" y="302" width="200" height="70" rx="8" fill="#fdecec" stroke="#ff6b6b"/>
+  <text x="600" y="324" text-anchor="middle" font-size="13" font-weight="bold" fill="#c22"><tspan>● DENY</tspan></text>
+  <text x="600" y="343" text-anchor="middle" font-size="10.5" fill="#902">blocked before any</text>
+  <text x="600" y="358" text-anchor="middle" font-size="10.5" fill="#902">side effect</text>
+  <!-- token broker note under ALLOW -->
+  <text x="120" y="392" text-anchor="middle" font-size="9.5" fill="#3a5a4b" font-style="italic">credentials/PII injected only here (broker + vault)</text>
+  <!-- audit log -->
+  <line x1="120" y1="372" x2="120" y2="418" stroke="#9ec9b4" stroke-width="1.3" stroke-dasharray="3,3"/>
+  <line x1="360" y1="372" x2="360" y2="418" stroke="#9ec9b4" stroke-width="1.3" stroke-dasharray="3,3"/>
+  <line x1="600" y1="372" x2="600" y2="418" stroke="#9ec9b4" stroke-width="1.3" stroke-dasharray="3,3"/>
+  <rect x="20" y="420" width="680" height="46" rx="8" fill="#eef3f0" stroke="#9ec9b4"/>
+  <text x="360" y="441" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#163b2a">Tamper-evident audit log</text>
+  <text x="360" y="458" text-anchor="middle" font-size="10" fill="#3a5a4b">every decision appended · blake3 hash chain · optional ed25519 sealed key · verified on startup</text>
+</svg>

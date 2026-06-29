@@ -27,6 +27,9 @@
 > (the data broker, ADR-0005). See [`evaluation/`](evaluation/) for the full,
 > honestly-caveated scorecard (including where an action-firewall's scope ends — below).
 >
+> **📄 White paper:** [design & threat model (PDF)](docs/whitepaper.pdf) — or read it
+> [on GitHub](docs/whitepaper.md) (with diagrams of how it works and its impact on the agent).
+>
 > **License:** [Apache-2.0](LICENSE) · **Governance:** [CONTRIBUTING](CONTRIBUTING.md) ·
 > [SECURITY](SECURITY.md) · [CODE_OF_CONDUCT](CODE_OF_CONDUCT.md) · [ADRs](docs/adr/)
 >

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 560 300" xmlns="http://www.w3.org/2000/svg" font-family="Helvetica Neue, Arial, sans-serif">
+  <!-- gridlines + y labels -->
+  <g stroke="#e0e7e3" stroke-width="1">
+    <line x1="80" y1="50" x2="520" y2="50"/>
+    <line x1="80" y1="100" x2="520" y2="100"/>
+    <line x1="80" y1="150" x2="520" y2="150"/>
+    <line x1="80" y1="200" x2="520" y2="200"/>
+  </g>
+  <g font-size="10" fill="#7a8780" text-anchor="end">
+    <text x="70" y="54">100%</text>
+    <text x="70" y="104">75%</text>
+    <text x="70" y="154">50%</text>
+    <text x="70" y="204">25%</text>
+    <text x="70" y="254">0%</text>
+  </g>
+  <line x1="80" y1="250" x2="520" y2="250" stroke="#9aa8a1" stroke-width="1.5"/>
+  <!-- bar 1: agent alone = 100% -->
+  <rect x="150" y="50" width="120" height="200" rx="3" fill="#ff5252"/>
+  <text x="210" y="42" text-anchor="middle" font-size="16" font-weight="bold" fill="#c22">100%</text>
+  <text x="210" y="272" text-anchor="middle" font-size="11" fill="#333">agent alone</text>
+  <!-- bar 2: agent + guardian = 0% -->
+  <rect x="330" y="246" width="120" height="4" rx="2" fill="#2ee66b"/>
+  <text x="390" y="238" text-anchor="middle" font-size="16" font-weight="bold" fill="#0e7a3a">0%</text>
+  <text x="390" y="272" text-anchor="middle" font-size="11" fill="#333">agent + Guardian</text>
+</svg>
