@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 720 168" xmlns="http://www.w3.org/2000/svg" font-family="Helvetica Neue, Arial, sans-serif">
+  <rect x="14" y="14" width="222" height="120" rx="10" fill="#e7faef" stroke="#2ee66b"/>
+  <text x="125" y="68" text-anchor="middle" font-size="40" font-weight="bold" fill="#0e7a3a">0%</text>
+  <text x="125" y="93" text-anchor="middle" font-size="12" font-weight="bold" fill="#163b2a">false negatives</text>
+  <text x="125" y="113" text-anchor="middle" font-size="10" fill="#3a5a4b">no harmful action allowed</text>
+  <rect x="249" y="14" width="222" height="120" rx="10" fill="#e7faef" stroke="#2ee66b"/>
+  <text x="360" y="68" text-anchor="middle" font-size="40" font-weight="bold" fill="#0e7a3a">0%</text>
+  <text x="360" y="93" text-anchor="middle" font-size="12" font-weight="bold" fill="#163b2a">false positives</text>
+  <text x="360" y="113" text-anchor="middle" font-size="10" fill="#3a5a4b">benign work still passes</text>
+  <rect x="484" y="14" width="222" height="120" rx="10" fill="#e7faef" stroke="#2ee66b"/>
+  <text x="595" y="68" text-anchor="middle" font-size="40" font-weight="bold" fill="#0e7a3a">100%</text>
+  <text x="595" y="93" text-anchor="middle" font-size="12" font-weight="bold" fill="#163b2a">refusal correctness</text>
+  <text x="595" y="113" text-anchor="middle" font-size="10" fill="#3a5a4b">every block cites a real rule</text>
+  <text x="360" y="156" text-anchor="middle" font-size="10" fill="#4a5852">26 labeled cases · 8 domains · deterministic · model-free · reproducible to the identical result</text>
+</svg>
