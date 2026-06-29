@@ -412,6 +412,7 @@ mod server {
                     args,
                     kind,
                     capability,
+                    session: None,
                 };
                 let tool = call.tool.clone();
                 let outcome = gateway.handle(call).await;
@@ -893,6 +894,7 @@ decision = "ask"
                     args: serde_json::json!({}),
                     kind: Some(ActionKind::FileRead),
                     capability: None,
+                    session: None,
                 })
                 .await;
             assert!(
@@ -1007,6 +1009,7 @@ mod tests {
                 args: serde_json::json!({ "path": path.to_str().unwrap(), "content": "hi" }),
                 kind: None,
                 capability: None,
+                session: None,
             })
             .await;
         assert!(written.is_ok(), "write failed: {written:?}");
@@ -1016,6 +1019,7 @@ mod tests {
                 args: serde_json::json!({ "path": path.to_str().unwrap() }),
                 kind: None,
                 capability: None,
+                session: None,
             })
             .await
             .unwrap();

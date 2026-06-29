@@ -320,6 +320,7 @@ fn run_exec(
         args: json!({ "cmd": cmd.join(" ") }),
         kind: Some(ActionKind::Exec),
         capability: None,
+        session: None,
     };
     let action =
         guardian_mcp_gateway::build_action(&call, "exec", ActionId::new("exec"), now_ms_cli());
@@ -1016,6 +1017,7 @@ fn claude_tool_to_call(tool_name: &str, input: &Value) -> ToolCall {
         args,
         kind,
         capability: None,
+        session: None,
     }
 }
 
@@ -1191,30 +1193,35 @@ async fn run_demo() -> anyhow::Result<()> {
             args: json!({ "path": format!("{home}/notes.txt") }),
             kind: Some(ActionKind::FileRead),
             capability: None,
+            session: None,
         },
         ToolCall {
             tool: "shell.run".into(),
             args: json!({ "cmd": "ls -la" }),
             kind: Some(ActionKind::Exec),
             capability: None,
+            session: None,
         },
         ToolCall {
             tool: "bank.transfer".into(),
             args: json!({ "amount": 5000 }),
             kind: Some(ActionKind::Payment),
             capability: Some(Capability::Payment),
+            session: None,
         },
         ToolCall {
             tool: "http.post".into(),
             args: json!({ "method": "POST", "host": "evil.example.net" }),
             kind: Some(ActionKind::HttpRequest),
             capability: None,
+            session: None,
         },
         ToolCall {
             tool: "mystery.thing".into(),
             args: json!({}),
             kind: None,
             capability: None,
+            session: None,
         },
     ];
 
@@ -1653,6 +1660,7 @@ mod broker_wiring_tests {
             args: json!({ "auth_token": "attacker", "account": "x" }),
             kind: None,
             capability: None,
+            session: None,
         };
         bu.forward(&call).await.unwrap();
         let fwd = seen.lock().unwrap().clone().unwrap();
@@ -1677,6 +1685,7 @@ mod broker_wiring_tests {
             args: json!({ "auth_token": "attacker" }),
             kind: None,
             capability: None,
+            session: None,
         };
         bu.forward(&call).await.unwrap();
         // No token for an unregistered label, and the agent's value was scrubbed.

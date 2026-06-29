@@ -127,6 +127,38 @@ impl DataVault {
         out.push_str(rest);
         out
     }
+
+    /// Tokenize every string inside a JSON value (recursively) — used to redact a tool
+    /// result before it reaches the agent.
+    pub fn tokenize_json(&mut self, v: &serde_json::Value) -> serde_json::Value {
+        use serde_json::Value;
+        match v {
+            Value::String(s) => Value::String(self.tokenize(s)),
+            Value::Array(a) => Value::Array(a.iter().map(|x| self.tokenize_json(x)).collect()),
+            Value::Object(o) => Value::Object(
+                o.iter()
+                    .map(|(k, x)| (k.clone(), self.tokenize_json(x)))
+                    .collect(),
+            ),
+            other => other.clone(),
+        }
+    }
+
+    /// Restore every token inside a JSON value (recursively) — used to detokenize an
+    /// agent's outbound call args at the authorized egress. `&self`: never mints.
+    pub fn detokenize_json(&self, v: &serde_json::Value) -> serde_json::Value {
+        use serde_json::Value;
+        match v {
+            Value::String(s) => Value::String(self.detokenize(s)),
+            Value::Array(a) => Value::Array(a.iter().map(|x| self.detokenize_json(x)).collect()),
+            Value::Object(o) => Value::Object(
+                o.iter()
+                    .map(|(k, x)| (k.clone(), self.detokenize_json(x)))
+                    .collect(),
+            ),
+            other => other.clone(),
+        }
+    }
 }
 
 /// A random, unguessable 128-bit token id (hex). Unforgeable so the agent cannot

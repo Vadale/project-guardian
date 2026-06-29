@@ -7,6 +7,16 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 
 ## [Unreleased]
 
+### Added — 2026-06-29 (ADR-0005 implementation, part 2 — tokenization wired into the gateway)
+- **The MCP gateway now applies the data vault on the live path** (opt-in via
+  `Gateway::with_data_protection(values)`): a tool **result** is tokenized before it
+  reaches the agent (sensitive values → opaque `[[GDN-…]]`), and an authorized outbound
+  call's **args** are detokenized **only at egress** (the agent only ever held tokens).
+  Vaults are **per-session** (new `ToolCall.session`), so a token minted in one session
+  can never be replayed in another. Off by default (empty list → zero overhead).
+  End-to-end tests: result tokenized to the agent, args detokenized at egress, and
+  cross-session replay does not resolve. 191 tests; fmt/clippy/deny green.
+
 ### Added — 2026-06-29 (ADR-0005 implementation, part 1)
 - **`guardian-broker::DataVault`** — the credential broker generalized to a **data
   broker** (ADR-0005): tokenize *carried* sensitive values into opaque `[[GDN-…]]`
