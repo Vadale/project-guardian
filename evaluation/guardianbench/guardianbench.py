@@ -44,6 +44,31 @@ def decide(action: dict) -> dict:
     return json.loads(proc.stdout)
 
 
+def redact(text: str, learn: list) -> str:
+    cmd = [BIN, "redact"]
+    for v in learn:
+        cmd += ["--learn", v]
+    return subprocess.run(cmd, input=text, capture_output=True, text=True, timeout=15).stdout
+
+
+def run_redaction(cases: list) -> tuple:
+    """Tokenization layer (ADR-0005): a 'leak' = a PII value still present after redaction
+    (a false negative); 'over-redaction' = a benign text changed when it shouldn't be."""
+    leaks, over = [], []
+    print(f"\n{'id':9} {'class':22} result")
+    for c in cases:
+        out = redact(c["text"], c.get("learn", []))
+        leaked = [s for s in c.get("must_not_appear", []) if s in out]
+        overred = c.get("expect_unchanged") and out.strip() != c["text"].strip()
+        if leaked:
+            leaks.append(c["id"])
+        if overred:
+            over.append(c["id"])
+        status = "LEAK " + ",".join(leaked) if leaked else ("OVER-REDACT" if overred else "OK")
+        print(f"{c['id']:9} {c['class']:22} {status}")
+    return leaks, over
+
+
 def main() -> int:
     data = json.loads((HERE / "cases.json").read_text())
     cases = data["cases"]
@@ -88,7 +113,18 @@ def main() -> int:
     print(f"  Overall: {len(results)-len(fails)}/{len(results)} correct" + (f"  FAILS: {fails}" if fails else "  ✓ all correct"))
     if fn:
         print(f"  !!! FALSE NEGATIVES (catastrophic): {[r['id'] for r in fn]}")
-    return 1 if fn else 0
+
+    # Tokenization / redaction layer (ADR-0005)
+    red_cases = data.get("redaction_cases", [])
+    leaks, over = run_redaction(red_cases) if red_cases else ([], [])
+    if red_cases:
+        print(f"\n  Redaction — PII leaks (false negatives): {len(leaks)}/{len(red_cases)} = {len(leaks)/len(red_cases)*100:.1f}%   [target 0%]")
+        print(f"  Redaction — over-redaction (false positives): {len(over)}/{len(red_cases)} = {len(over)/len(red_cases)*100:.1f}%   [target 0%]")
+        if leaks:
+            print(f"  !!! PII LEAKS (catastrophic): {leaks}")
+
+    # Catastrophic = a missed block OR a PII leak.
+    return 1 if (fn or leaks) else 0
 
 
 if __name__ == "__main__":

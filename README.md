@@ -19,7 +19,8 @@
 > attack-success rate on the banking suite from **100% → 0%** (deterministic deny on
 > money-movement). Our own **[GuardianBench](evaluation/guardianbench/)** — a benchmark
 > built *for an action-firewall* — scores **0% false-negatives, 0% false-positives, 100%
-> refusal-correctness** across 8 domains. See [`evaluation/`](evaluation/) for the full,
+> refusal-correctness** across 8 domains, plus **0% PII leaks** in its tokenization layer
+> (the data broker, ADR-0005). See [`evaluation/`](evaluation/) for the full,
 > honestly-caveated scorecard (including where an action-firewall's scope ends — below).
 >
 > **License:** [Apache-2.0](LICENSE) · **Governance:** [CONTRIBUTING](CONTRIBUTING.md) ·

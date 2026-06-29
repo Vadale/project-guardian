@@ -15,8 +15,10 @@
 pub mod capability;
 pub mod credential;
 pub mod keychain;
+pub mod vault;
 
 pub use capability::{CapabilityRequest, CaveatViolation, Caveats};
+pub use vault::DataVault;
 
 use std::collections::HashMap;
 
