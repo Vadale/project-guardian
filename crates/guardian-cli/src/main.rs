@@ -74,6 +74,14 @@ enum Command {
         #[arg(long)]
         policy: Option<PathBuf>,
     },
+    /// Read text on stdin and print it with sensitive values replaced by opaque tokens
+    /// (the data-vault / tokenization layer, ADR-0005). `--learn` registers a known
+    /// sensitive value (repeatable); Luhn-valid card numbers are detected automatically.
+    Redact {
+        /// A known sensitive value to tokenize on sight (repeatable).
+        #[arg(long = "learn")]
+        learn: Vec<String>,
+    },
     /// Claude Code `PreToolUse` hook adapter: read the hook JSON on stdin and emit
     /// the permission decision (allow/ask/deny) so Guardian mediates native tools.
     Hook {
@@ -248,6 +256,7 @@ async fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Command::Decide { policy } => run_decide(policy),
+        Command::Redact { learn } => run_redact(learn),
         Command::Hook { policy } => run_claude_hook(policy),
         Command::Log {
             audit,
@@ -835,6 +844,18 @@ fn cell(s: &str, max: usize) -> String {
 /// Read a tool-call JSON object from stdin and print the policy decision as JSON,
 /// without executing anything. This is the integration point for external
 /// evaluators (e.g. the AgentDojo shim): one decision per call.
+fn run_redact(learn: Vec<String>) -> anyhow::Result<()> {
+    use std::io::Read;
+    let mut input = String::new();
+    std::io::stdin().read_to_string(&mut input)?;
+    let mut vault = guardian_broker::DataVault::new();
+    for v in &learn {
+        vault.learn(v);
+    }
+    print!("{}", vault.tokenize(&input));
+    Ok(())
+}
+
 fn run_decide(policy_path: Option<PathBuf>) -> anyhow::Result<()> {
     use std::io::Read;
     let mut input = String::new();

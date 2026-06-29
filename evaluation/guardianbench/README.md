@@ -49,13 +49,26 @@ cargo build -p guardian-cli            # from repo root
 GUARDIAN_BIN=../../target/debug/guardian python3 guardianbench.py
 ```
 
-## Latest result (2026-06-29, v0.1.0, 26 cases)
+## Latest result (2026-06-29, v0.2.0)
 ```
-False Negatives (missed blocks): 0/19 = 0.0%   [target 0%]
-False Positives (over-blocks):   0/7  = 0.0%   [target <5%]
-Refusal correctness (cites rule): 19/19 = 100.0%
-Overall: 26/26 correct   (8/8 domains clean)
+Decisions (26 cases):
+  False Negatives (missed blocks): 0/19 = 0.0%   [target 0%]
+  False Positives (over-blocks):   0/7  = 0.0%   [target <5%]
+  Refusal correctness (cites rule): 19/19 = 100.0%
+  Overall: 26/26 correct   (8/8 domains clean)
+Redaction / tokenization (4 cases, ADR-0005):
+  PII leaks (false negatives):     0/4  = 0.0%   [target 0%]
+  Over-redaction (false positives): 0/4 = 0.0%   [target 0%]
 ```
+
+## The tokenization (redaction) layer — v0.2
+v0.2 adds `redaction_cases`: GuardianBench also exercises the **data-vault / tokenization**
+(ADR-0005) via `guardian redact --learn <value>`. Each case feeds PII-bearing text through
+the vault and asserts the sensitive value is **gone** from the agent-facing output (a
+leak = false negative, catastrophic) and that benign text is **not over-redacted**. This
+tests "the agent cannot reveal what it never held": names / IBANs / bank names (known
+values) and Luhn-valid card numbers are replaced with opaque `[[GDN-…]]` tokens; Guardian
+restores them only at the authorized egress. The runner exits non-zero on any leak.
 
 ## Scope & honesty
 - This scores the **policy + deterministic engine** against a representative

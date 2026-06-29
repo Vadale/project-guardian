@@ -7,6 +7,25 @@ All notable changes to Project Guardian are recorded here. Format loosely follow
 
 ## [Unreleased]
 
+### Added — 2026-06-29 (ADR-0005 implementation, part 1)
+- **`guardian-broker::DataVault`** — the credential broker generalized to a **data
+  broker** (ADR-0005): tokenize *carried* sensitive values into opaque `[[GDN-…]]`
+  references so the agent never holds them, detokenize only at the authorized egress.
+  Detection = exact-match of **known values** (`learn`; the precise part Guardian owns
+  in Rust) + a built-in **Luhn-checked credit-card** detector; fuzzy free-text NER stays
+  delegated to a sidecar. New `guardian redact --learn <v>` CLI exposes it. Tests cover
+  round-trip, token stability/dedup, card detection (contiguous/space/dash), no
+  over-redaction, unknown-token passthrough.
+- **`guardian-proxy::tag_exfiltration`** — the proxy now tags
+  `Capability::Exfiltration` when an outbound body carries a known secret **to an
+  untrusted host**, so the engine's intrinsic critical-category floor backs up the deny
+  rule even against a malicious pack; a secret to a *trusted* host stays untagged (no
+  over-block). threat-model §5.4 updated (Exfiltration is now tagged).
+- **GuardianBench v0.2** — adds a **redaction/tokenization** dimension: feeds PII-bearing
+  text through `guardian redact` and scores PII leaks (FN, target 0%) and over-redaction.
+  Latest: decisions 26/26 (FN/FP 0%, refusal 100%) + redaction 0% leaks / 0% over-redact.
+  186 tests; fmt/clippy/deny green.
+
 ### Decided — 2026-06-29 (ADR-0005: privacy data-handling)
 - **ADR-0005**: split by criticality. **Own** the *vault + structured-PII tokenization*
   (IBAN/card/phone/email/account — regex-detectable, the broker generalized) in **native
