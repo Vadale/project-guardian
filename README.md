@@ -1,6 +1,6 @@
 # Project Guardian — An AI Guardian Firewall for Autonomous Agents
 
-> **Status:** working product, approaching 1.0. Rust workspace, ~164 tests green.
+> **Status:** working product, **v0.1.0 released**. Rust workspace, 176 tests green.
 > Implemented through **Phase 4 (hardening)**: the deterministic policy engine, the
 > tamper-evident audit log (optionally **sealed-key signed**), the advisory Checker,
 > the MCP gateway + stdio transport, the daemon + control socket, the terminal
@@ -8,9 +8,19 @@
 > interception** (broker-injected credentials, exfiltration inspection, default-deny
 > egress, cockpit `ask`-routing), the **OS exec sandbox**, the **token broker** (OS
 > keychain + least-privilege caveats), **lightweight verifiable credentials**,
-> **adaptive suggestions + safety report**, and **ed25519-signed community policy
-> packs**. Getting started: [`docs/user-guide.md`](docs/user-guide.md). Remaining for
-> 1.0: signed/notarized **packaging** and the desktop GUI — see [`ROADMAP.md`](ROADMAP.md).
+> **adaptive suggestions + safety report**, **ed25519-signed community policy
+> packs**, and an **intrinsic critical-category floor** (money / credentials /
+> exfiltration / irreversible deletion can never resolve to a silent `allow`, not even
+> via a signed pack). Getting started: [`docs/user-guide.md`](docs/user-guide.md).
+> Remaining for 1.0: signed/notarized **packaging** and the desktop GUI — see
+> [`ROADMAP.md`](ROADMAP.md).
+>
+> **Evaluation:** on AgentDojo with a local 12B agent, Guardian cuts the prompt-injection
+> attack-success rate on the banking suite from **100% → 0%** (deterministic deny on
+> money-movement). Our own **[GuardianBench](evaluation/guardianbench/)** — a benchmark
+> built *for an action-firewall* — scores **0% false-negatives, 0% false-positives, 100%
+> refusal-correctness** across 8 domains. See [`evaluation/`](evaluation/) for the full,
+> honestly-caveated scorecard (including where an action-firewall's scope ends — below).
 >
 > **License:** [Apache-2.0](LICENSE) · **Governance:** [CONTRIBUTING](CONTRIBUTING.md) ·
 > [SECURITY](SECURITY.md) · [CODE_OF_CONDUCT](CODE_OF_CONDUCT.md) · [ADRs](docs/adr/)
@@ -46,6 +56,8 @@ cargo run -p guardian-cli -- demo
 
 # 2) the internal red-team scorecard (deterministic, no model needed)
 cargo run -p guardian-cli -- eval
+#    ...and GuardianBench, our action-firewall benchmark (FN 0% / FP 0% / refusal 100%):
+GUARDIAN_BIN=target/release/guardian python3 evaluation/guardianbench/guardianbench.py
 
 # 3) the full loop for a real agent — three terminals:
 GUARDIAN_SOCK=/tmp/g.sock cargo run -p guardian-daemon       # the service
@@ -343,7 +355,8 @@ machine-readable form; only the human-facing presentation is translated.
 | **Hallucinating / misaligned agent** | Issues a destructive or wrong action in good faith | Deterministic policy engine; `ask` for anything irreversible; Checker translation so the human catches it |
 | **Prompt injection** (the #1 threat) | Malicious instructions hidden in web pages, PDFs, emails, or tool results steer the agent | Policy evaluates the *real* action regardless of why the agent wants it; critical categories always `ask`/`deny`; optional LLM-gateway sanitization of tool results; Checker never reads attacker-controlled prose as authority |
 | **Compromised / malicious MCP server or tool** | A tool lies about what it does, or exfiltrates | Guardian sees the actual call/args and the actual network egress (proxy), not the tool's self-description; egress allowlists |
-| **Malicious policy pack** (supply chain) | A community pack whitelists an exfiltration path | Signed packs, mandatory review, reputation, and a "packs cannot widen critical-category permissions without explicit user opt-in" rule |
+| **Sensitive-data leak via the agent's *output*** | An injection makes the agent put account numbers, who-did-what, or secrets into its response/reasoning | For data to reach an attacker it must cross a *channel* (message / network / file) — which is an **action** Guardian gates; the **token broker** (§5.6) keeps credentials and full secrets **out of the agent entirely** (injected only into the authorized egress, so the agent cannot reveal what it never held); residual data the agent legitimately handled is bounded by least-privilege + a planned **output-guard** (Checker-side DLP redaction). The action-firewall does **not** police the agent's prose by design |
+| **Malicious policy pack** (supply chain) | A community pack whitelists an exfiltration path | Signed packs, mandatory review, reputation, a "packs cannot widen critical-category permissions without explicit user opt-in" rule, **and an intrinsic runtime floor** — critical-category actions can never resolve to a silent `allow` regardless of any rule or pack |
 | **Attack on Guardian itself** (it holds the keys) | Tamper with policy, steal brokered creds, forge the log | Sealed keys (Secure Enclave/TPM), signed/locked policy, hash-chained log, notarized builds, fail-closed |
 | **Agent disables / bypasses its guardian** | Kill the daemon, remove the proxy CA, or route around the gateway to escape supervision | Guardian is the agent's *only* path to tools (no decision → no action = **fail closed**); the agent has no authority to stop the daemon or alter CA/policy; supervised restart; gaps flagged in the log. See §5.8 |
 | **Habituation attack** | Train the adaptive layer to auto-allow, then strike | Never auto-downgrade critical categories; decay + context binding |
