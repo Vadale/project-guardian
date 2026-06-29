@@ -197,6 +197,9 @@ impl GuardianHandler {
         if signals.is_websocket_upgrade {
             extra.insert("upgrade".into(), "websocket".into());
         }
+        // Tag exfiltration-to-untrusted so the engine's critical-category floor backs
+        // up the deny rule even against a malicious pack (ADR-0005).
+        crate::tag_exfiltration(&mut action, &self.env.trusted_hosts);
         let outcome = self.policy.evaluate(&action, &self.env);
         (req, action, outcome)
     }

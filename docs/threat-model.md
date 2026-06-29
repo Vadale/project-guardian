@@ -68,20 +68,15 @@ is a critical category (money, credentials, exfiltration, irreversible deletion)
 never resolve to `allow` — a would-be allow is floored to `ask` — regardless of any
 rule or pack. The floor is intrinsic to the action's capability, not to a rule flag.
 **Coverage bound (be precise):** the floor keys off the action's *capability* tag, so
-its reach is only as complete as the adapter's capability tagging. Today the
-mcp-gateway tags `Payment`/`Credential`/`IrreversibleDelete`, so those are floored;
-but **`Exfiltration` is currently emitted by no adapter** — the network proxy detects
-exfiltration via the *rule* `extra.body_contains_known_secret`, not via a capability,
-and sets `capability = None`. So for the exfiltration scenario in this section the
-floor adds **no runtime coverage yet**: exfiltration protection still rests on the deny
-rule (a malicious pack would have to defeat that rule, which it cannot silently widen
-without the flag — but the intrinsic floor does not yet back it up). Likewise an
-`Exec`/`Other` action with no capability is not floored (it falls to the `Exec`
-rules / restrictive default). Closing this needs the proxy to tag
-`Capability::Exfiltration` **only for an untrusted destination** (a secret sent to a
-*trusted* host is legitimate, so naive tagging would over-block) — tracked, together
-with completing capability inference and optionally deriving criticality from
-`ActionKind`. Maps to OWASP LLM03.
+its reach is only as complete as the adapter's capability tagging. The mcp-gateway tags
+`Payment`/`Credential`/`IrreversibleDelete`, and the **network proxy now tags
+`Exfiltration`** when an outbound body carries a known secret **to an untrusted host**
+(`proxy::tag_exfiltration`, ADR-0005) — a secret to a *trusted* host is legitimate and is
+left untagged (no over-block). So the floor now backs up the deny rule for exfiltration
+too: even a malicious pack that removed the deny rule could not get the engine to silently
+allow it. The remaining gap is the `Exec`/`Other` action with no capability (it falls to
+the `Exec` rules / restrictive default); completing capability inference there, and
+optionally deriving criticality from `ActionKind`, is tracked. Maps to OWASP LLM03.
 
 ### 5.5 Attack on Guardian itself
 Tamper with policy, steal brokered credentials, or forge the log. **Defense:**

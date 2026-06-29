@@ -18,7 +18,7 @@
 #![forbid(unsafe_code)]
 
 use guardian_broker::Broker;
-use guardian_core::{Action, ActionContext, ActionId, ActionKind, Decision};
+use guardian_core::{Action, ActionContext, ActionId, ActionKind, Capability, Decision};
 use guardian_policy::{CompiledPolicy, EvalEnv, EvalOutcome};
 
 pub mod ca;
@@ -91,6 +91,32 @@ pub fn to_action(req: &HttpRequest) -> Action {
             path: None,
             extra: serde_json::Map::new(),
         },
+    }
+}
+
+/// Tag an outbound request as [`Capability::Exfiltration`] when it carries one of the
+/// user's known secrets **to an untrusted host** — so the engine's intrinsic
+/// critical-category floor (ADR-0005 / invariant #4) can never let it resolve to a
+/// silent `allow`, even if a rule or a signed pack tried to. A secret sent to a
+/// *trusted* host is legitimate and is left untagged (no over-block). Idempotent;
+/// expects `body_contains_known_secret` to already be set in `context.extra`.
+pub fn tag_exfiltration(action: &mut Action, trusted_hosts: &[String]) {
+    let carries_secret = action
+        .context
+        .extra
+        .get("body_contains_known_secret")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if !carries_secret {
+        return;
+    }
+    let to_trusted = action
+        .context
+        .host
+        .as_deref()
+        .is_some_and(|h| trusted_hosts.iter().any(|t| t == h));
+    if !to_trusted {
+        action.capability = Some(Capability::Exfiltration);
     }
 }
 
@@ -257,6 +283,53 @@ explain = "Money movement on the bank is blocked."
             "token must not appear in Debug: {dbg}"
         );
         assert!(dbg.contains("<redacted>"));
+    }
+
+    fn with_secret(mut action: Action) -> Action {
+        action
+            .context
+            .extra
+            .insert("body_contains_known_secret".into(), true.into());
+        action
+    }
+
+    #[test]
+    fn exfiltration_tagged_for_secret_to_untrusted_host() {
+        let mut action = with_secret(to_action(&req("POST", "evil.example", "/collect")));
+        tag_exfiltration(&mut action, &[]);
+        assert_eq!(action.capability, Some(Capability::Exfiltration));
+    }
+
+    #[test]
+    fn secret_to_trusted_host_is_not_tagged() {
+        let mut action = with_secret(to_action(&req("POST", "api.example.com", "/")));
+        tag_exfiltration(&mut action, &["api.example.com".to_string()]);
+        assert_eq!(
+            action.capability, None,
+            "a secret to a trusted host is legitimate"
+        );
+    }
+
+    #[test]
+    fn no_secret_is_not_tagged() {
+        let mut action = to_action(&req("POST", "evil.example", "/"));
+        tag_exfiltration(&mut action, &[]);
+        assert_eq!(action.capability, None);
+    }
+
+    #[test]
+    fn tagged_exfiltration_is_floored_even_under_an_allowing_policy() {
+        // A GET matches the permissive `allow-get` rule, but the exfiltration tag makes
+        // the engine's critical-category floor refuse a silent allow.
+        let mut action = with_secret(to_action(&req("GET", "evil.example", "/leak")));
+        tag_exfiltration(&mut action, &[]);
+        let outcome = policy().evaluate(&action, &env());
+        assert!(
+            matches!(outcome.decision, Decision::Ask { .. }),
+            "exfiltration must not be silently allowed, got {:?}",
+            outcome.decision
+        );
+        assert!(outcome.critical);
     }
 
     #[test]
